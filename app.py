@@ -28,8 +28,8 @@ with col2:
 # 側邊欄：參數設定
 st.sidebar.header("⚙️ 篩選門檻設定")
 # 已將總分改為平均分
-target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=55.0)
-core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=45.0)
+target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=60.0)
+core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=60.0)
 underperform_cap = st.sidebar.number_input("進步/保底：平均分上限", value=50.0)
 progress_score = st.sidebar.number_input("進步：分數提升門檻", value=3.0)
 
