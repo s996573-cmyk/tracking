@@ -14,7 +14,7 @@ def to_numeric(val):
     try: return float(val)
     except: return np.nan
 
-# DSE 等級轉為數值分數以便計算相關性
+# DSE 等級轉為數值分數以便計算相關性與門檻
 def grade_to_level(g):
     g_str = str(g).strip().upper()
     mapping = {'5**': 7, '5*': 6, '5': 5, '4': 4, '3': 3, '2': 2, '1': 1, 'U': 0, 'UNCLASSIFIED': 0}
@@ -46,7 +46,7 @@ st.title("📊 學生成績追蹤與公開試分析系統")
 student_info_df = load_student_info()
 
 # 建立多分頁架構：支援初中追蹤與中六 DSE 分析
-main_tab1, main_tab2 = st.tabs(["📚 初中/常規測考追蹤分析", "🎓 中六公開試 (DSE) 成效與相關係數分析"])
+main_tab1, main_tab2 = st.tabs(["📚 初中/常規測考追蹤分析", "🎓 中六公開試 (DSE) 成效、相關性與大學門檻分析"])
 
 with main_tab1:
     st.write("上傳 數據1 與 數據2 的 Excel 檔案，系統將自動為學生進行分類。")
@@ -130,8 +130,8 @@ with main_tab1:
         st.info("💡 請上傳兩個常規成績檔案。")
 
 with main_tab2:
-    st.subheader("🎓 中六模擬試與香港中學文憑考試 (DSE) 關聯分析")
-    st.write("上傳中六模擬試成績 (如 2526_T1A3_s6.xlsx) 與實際公開試成績 (hkdse.xlsx)，系統將自動計算各主科的相關係數。")
+    st.subheader("🎓 中六模擬試與 DSE 公開試深度分析（含大學入學門檻對照）")
+    st.write("上傳中六模擬試成績 (如 2526_T1A3_s6.xlsx) 與實際公開試成績 (hkdse.xlsx)，系統將自動進行相關係數分析並檢核大學收生門檻（中 $\ge 3$、英 $\ge 3$、數 $\ge 2$）。")
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
@@ -152,7 +152,15 @@ with main_tab2:
             if student_info_df is not None:
                 merged_dse = pd.merge(merged_dse, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
                 
-            # 各主科對應關係計算
+            # 轉換 DSE 等級以檢核大學門檻
+            merged_dse['DSE_Chi_Lvl'] = merged_dse['A010 Chinese'].apply(grade_to_level)
+            merged_dse['DSE_Eng_Lvl'] = merged_dse['A020 English'].apply(grade_to_level)
+            merged_dse['DSE_Math_Lvl'] = merged_dse['A030 Math Compulsory'].apply(grade_to_level)
+            
+            # 判定是否達到大學基本入學要求 (中3、英3、數2)
+            merged_dse['Met_U_Req'] = (merged_dse['DSE_Chi_Lvl'] >= 3) & (merged_dse['DSE_Eng_Lvl'] >= 3) & (merged_dse['DSE_Math_Lvl'] >= 2)
+            
+            # 各主科相關係數計算
             subjects_map = [
                 ('中文', 'T1A3_中文_C_Score', 'A010 Chinese'),
                 ('英文', 'T1A3_英文_E_Score', 'A020 English'),
@@ -179,17 +187,14 @@ with main_tab2:
                         r = sub_c['Temp_M'].corr(sub_c['Temp_D'])
                         corr_results.append({'科目': name, '有效樣本數': len(sub_c), '相關係數 (r)': round(r, 3)})
             
-            st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生的公開試與模擬試數據！")
+            st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生的公開試與模擬試數據！其中達到大學基本收生要求（中3、英3、數2）共 **{merged_dse['Met_U_Req'].sum()}** 人。")
             
             st.markdown("### 📈 各主科模擬試成績與 DSE 實際等級相關係數")
             if corr_results:
-                corr_df = pd.DataFrame(corr_results)
-                st.dataframe(corr_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("未偵測到足夠的科目對應數據。")
-                
-            # 個人對照表
-            st.markdown("### 📋 學生個人模擬試與 DSE 成績對照表")
+                st.dataframe(pd.DataFrame(corr_results), use_container_width=True, hide_index=True)
+            
+            # 個人對照表與大學門檻達標狀態
+            st.markdown("### 📋 學生模擬試表現與 DSE 大學門檻達標對照表")
             display_dse_cols = ['Class', 'Class No.']
             dse_rename = {'Class': '班別', 'Class No.': '班號'}
             
@@ -199,12 +204,13 @@ with main_tab2:
             display_dse_cols.append('Name')
             dse_rename['Name'] = '英文姓名'
             
-            display_dse_cols.extend(['T1A3_Score', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory'])
+            display_dse_cols.extend(['T1A3_Score', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory', 'Met_U_Req'])
             dse_rename.update({
                 'T1A3_Score': '模擬試總平均分',
-                'A010 Chinese': 'DSE中文等級',
-                'A020 English': 'DSE英文等級',
-                'A030 Math Compulsory': 'DSE數學等級'
+                'A010 Chinese': 'DSE中文',
+                'A020 English': 'DSE英文',
+                'A030 Math Compulsory': 'DSE數學',
+                'Met_U_Req': '達大學基本門檻(中3英3數2)'
             })
             
             st.dataframe(merged_dse[display_dse_cols].rename(columns=dse_rename), use_container_width=True, hide_index=True)
