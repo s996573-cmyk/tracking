@@ -46,7 +46,7 @@ st.title("📊 學生成績追蹤與公開試分析系統")
 student_info_df = load_student_info()
 
 # 建立多分頁架構：支援初中追蹤與中六 DSE 分析
-main_tab1, main_tab2 = st.tabs(["📚 初中/常規測考追蹤分析", "🎓 中六公開試 (DSE) 成效分析"])
+main_tab1, main_tab2 = st.tabs(["📚 初中/常規測考追蹤分析", "🎓 中六公開試 (DSE) 成效與相關係數分析"])
 
 with main_tab1:
     st.write("上傳 數據1 與 數據2 的 Excel 檔案，系統將自動為學生進行分類。")
@@ -131,7 +131,7 @@ with main_tab1:
 
 with main_tab2:
     st.subheader("🎓 中六模擬試與香港中學文憑考試 (DSE) 關聯分析")
-    st.write("上傳中六模擬試成績 (如 2526_T1A3_s6.xlsx) 與實際公開試成績 (hkdse.xlsx)，系統將自動對比並分析預測準確度。")
+    st.write("上傳中六模擬試成績 (如 2526_T1A3_s6.xlsx) 與實際公開試成績 (hkdse.xlsx)，系統將自動計算各主科的相關係數。")
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
@@ -144,7 +144,6 @@ with main_tab2:
             df_mock = pd.read_excel(mock_file)
             df_dse = pd.read_excel(dse_file)
             
-            # 清洗學號以作配對
             df_mock['Reg_Clean'] = df_mock['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
             df_dse['Reg_Clean'] = df_dse['Registration No.'].astype(str).str.strip()
             
@@ -153,33 +152,43 @@ with main_tab2:
             if student_info_df is not None:
                 merged_dse = pd.merge(merged_dse, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
                 
-            # 轉換 DSE 等級
-            merged_dse['DSE_Chi_Lvl'] = merged_dse['A010 Chinese'].apply(grade_to_level)
-            merged_dse['DSE_Eng_Lvl'] = merged_dse['A020 English'].apply(grade_to_level)
-            merged_dse['DSE_Math_Lvl'] = merged_dse['A030 Math Compulsory'].apply(grade_to_level)
+            # 各主科對應關係計算
+            subjects_map = [
+                ('中文', 'T1A3_中文_C_Score', 'A010 Chinese'),
+                ('英文', 'T1A3_英文_E_Score', 'A020 English'),
+                ('數學必修', 'T1A3_數必_C_Score', 'A030 Math Compulsory'),
+                ('物理', 'T1A3_物理_C_Score', 'A150 Physics'),
+                ('化學', 'T1A3_化學_C_Score', 'A140 Chemistry'),
+                ('生物', 'T1A3_生物_C_Score', 'A130 Biology'),
+                ('經濟', 'T1A3_經濟_C_Score', 'A080 Economics'),
+                ('地理', 'T1A3_地理_C_Score', 'A100 Geography'),
+                ('歷史', 'T1A3_歷史_C_Score', 'A110 History')
+            ]
             
-            # 模擬試分數
-            merged_dse['Mock_Overall'] = pd.to_numeric(merged_dse['T1A3_Score'], errors='coerce')
-            merged_dse['Mock_Chi'] = pd.to_numeric(merged_dse['T1A3_中文_C_Score'], errors='coerce')
-            merged_dse['Mock_Eng'] = pd.to_numeric(merged_dse['T1A3_英文_E_Score'], errors='coerce')
-            merged_dse['Mock_Math'] = pd.to_numeric(merged_dse['T1A3_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數必_E_Score'], errors='coerce'))
+            corr_results = []
+            for name, m_col, d_col in subjects_map:
+                if m_col in merged_dse.columns and d_col in merged_dse.columns:
+                    if name == '數學必修':
+                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse['T1A3_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數必_E_Score'], errors='coerce'))
+                    else:
+                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse[m_col], errors='coerce')
+                        
+                    merged_dse['Temp_D'] = merged_dse[d_col].apply(grade_to_level)
+                    sub_c = merged_dse[['Temp_M', 'Temp_D']].dropna()
+                    if len(sub_c) > 3:
+                        r = sub_c['Temp_M'].corr(sub_c['Temp_D'])
+                        corr_results.append({'科目': name, '有效樣本數': len(sub_c), '相關係數 (r)': round(r, 3)})
             
             st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生的公開試與模擬試數據！")
             
-            # 顯示核心科目相關係數分析
-            st.markdown("### 📈 模擬試分數與 DSE 實際等級相關性報告")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                chi_corr = merged_dse['Mock_Chi'].corr(merged_dse['DSE_Chi_Lvl'])
-                st.metric("中國語文相關度", f"{chi_corr:.2f}")
-            with c2:
-                eng_corr = merged_dse['Mock_Eng'].corr(merged_dse['DSE_Eng_Lvl'])
-                st.metric("英國語文相關度", f"{eng_corr:.2f}")
-            with c3:
-                math_corr = merged_dse['Mock_Math'].corr(merged_dse['DSE_Math_Lvl'])
-                st.metric("數學必修科相關度", f"{math_corr:.2f}")
+            st.markdown("### 📈 各主科模擬試成績與 DSE 實際等級相關係數")
+            if corr_results:
+                corr_df = pd.DataFrame(corr_results)
+                st.dataframe(corr_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("未偵測到足夠的科目對應數據。")
                 
-            # 呈現詳細對比清單
+            # 個人對照表
             st.markdown("### 📋 學生個人模擬試與 DSE 成績對照表")
             display_dse_cols = ['Class', 'Class No.']
             dse_rename = {'Class': '班別', 'Class No.': '班號'}
@@ -190,9 +199,9 @@ with main_tab2:
             display_dse_cols.append('Name')
             dse_rename['Name'] = '英文姓名'
             
-            display_dse_cols.extend(['Mock_Overall', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory'])
+            display_dse_cols.extend(['T1A3_Score', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory'])
             dse_rename.update({
-                'Mock_Overall': '模擬試總平均分',
+                'T1A3_Score': '模擬試總平均分',
                 'A010 Chinese': 'DSE中文等級',
                 'A020 English': 'DSE英文等級',
                 'A030 Math Compulsory': 'DSE數學等級'
