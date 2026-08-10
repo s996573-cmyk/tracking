@@ -57,8 +57,9 @@ with main_tab1:
         file2 = st.file_uploader("上傳 數據2 (Excel)", type=["xls", "xlsx"], key="f2")
 
     st.sidebar.header("⚙️ 篩選門檻設定 (常規)")
-    target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=55.0)
-    core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=45.0)
+    # 已將預設值調整為 60.0
+    target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=60.0)
+    core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=60.0)
     underperform_cap = st.sidebar.number_input("進步/保底：平均分上限", value=50.0)
     progress_score = st.sidebar.number_input("進步：分數提升門檻", value=3.0)
 
@@ -152,15 +153,12 @@ with main_tab2:
             if student_info_df is not None:
                 merged_dse = pd.merge(merged_dse, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
                 
-            # 轉換 DSE 等級以檢核大學門檻
             merged_dse['DSE_Chi_Lvl'] = merged_dse['A010 Chinese'].apply(grade_to_level)
             merged_dse['DSE_Eng_Lvl'] = merged_dse['A020 English'].apply(grade_to_level)
             merged_dse['DSE_Math_Lvl'] = merged_dse['A030 Math Compulsory'].apply(grade_to_level)
             
-            # 判定是否達到大學基本入學要求 (中3、英3、數2)
             merged_dse['Met_U_Req'] = (merged_dse['DSE_Chi_Lvl'] >= 3) & (merged_dse['DSE_Eng_Lvl'] >= 3) & (merged_dse['DSE_Math_Lvl'] >= 2)
             
-            # 各主科與選修科相關係數計算 (已對應：數1=M1, 企財=BAFS, 資通=ICT, 視憑=Visual Arts, 倫教=ERS)
             subjects_map = [
                 ('中文', 'T1A3_中文_C_Score', 'A010 Chinese'),
                 ('英文', 'T1A3_英文_E_Score', 'A020 English'),
@@ -200,7 +198,6 @@ with main_tab2:
             if corr_results:
                 st.dataframe(pd.DataFrame(corr_results), use_container_width=True, hide_index=True)
             
-            # 個人對照表與大學門檻達標狀態
             st.markdown("### 📋 學生模擬試表現與 DSE 大學門檻達標對照表")
             display_dse_cols = ['Class', 'Class No.']
             dse_rename = {'Class': '班別', 'Class No.': '班號'}
