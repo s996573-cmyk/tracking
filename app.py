@@ -160,11 +160,16 @@ with main_tab2:
             # 判定是否達到大學基本入學要求 (中3、英3、數2)
             merged_dse['Met_U_Req'] = (merged_dse['DSE_Chi_Lvl'] >= 3) & (merged_dse['DSE_Eng_Lvl'] >= 3) & (merged_dse['DSE_Math_Lvl'] >= 2)
             
-            # 各主科相關係數計算
+            # 各主科與選修科相關係數計算 (已對應：數1=M1, 企財=BAFS, 資通=ICT, 視憑=Visual Arts, 倫教=ERS)
             subjects_map = [
                 ('中文', 'T1A3_中文_C_Score', 'A010 Chinese'),
                 ('英文', 'T1A3_英文_E_Score', 'A020 English'),
                 ('數學必修', 'T1A3_數必_C_Score', 'A030 Math Compulsory'),
+                ('數學 M1 (數1)', 'T1A3_數一_C_Score', 'A031 M1'),
+                ('企業會計與財務概論 (企財/BAFS)', 'T1A3_企財_C_Score', 'A171 BAFS(Accounting)'),
+                ('資訊及通訊科技 (資通/ICT)', 'T1A3_資通_C_Score', 'A200 ICT'),
+                ('視覺藝術 (視憑/Visual Arts)', 'T1A3_視憑_C_Score', 'A230 Visual Arts'),
+                ('倫理與宗教 (倫教/ERS)', 'T1A3_倫教_C_Score', 'A090 Ethics and Religious Studies'),
                 ('物理', 'T1A3_物理_C_Score', 'A150 Physics'),
                 ('化學', 'T1A3_化學_C_Score', 'A140 Chemistry'),
                 ('生物', 'T1A3_生物_C_Score', 'A130 Biology'),
@@ -178,12 +183,14 @@ with main_tab2:
                 if m_col in merged_dse.columns and d_col in merged_dse.columns:
                     if name == '數學必修':
                         merged_dse['Temp_M'] = pd.to_numeric(merged_dse['T1A3_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數必_E_Score'], errors='coerce'))
+                    elif name == '數學 M1 (數1)':
+                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse['T1A3_數一_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數一_E_Score'], errors='coerce'))
                     else:
                         merged_dse['Temp_M'] = pd.to_numeric(merged_dse[m_col], errors='coerce')
                         
                     merged_dse['Temp_D'] = merged_dse[d_col].apply(grade_to_level)
                     sub_c = merged_dse[['Temp_M', 'Temp_D']].dropna()
-                    if len(sub_c) > 3:
+                    if len(sub_c) > 2:
                         r = sub_c['Temp_M'].corr(sub_c['Temp_D'])
                         corr_results.append({'科目': name, '有效樣本數': len(sub_c), '相關係數 (r)': round(r, 3)})
             
