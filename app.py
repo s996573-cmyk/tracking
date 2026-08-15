@@ -41,10 +41,11 @@ st.title("📊 學生成績追蹤與公開試分析系統")
 
 student_info_df = load_student_info()
 
-main_tab1, main_tab2, main_tab3 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📚 初中/常規測考追蹤分析", 
     "🎓 中六公開試 (DSE) 成效與相關性分析", 
-    "🔮 下屆中六測驗 (T1A1) 升學潛質預測與培訓"
+    "🔮 下屆中六測驗 (T1A1) 升學潛質預測",
+    "☀️ 開學前夕：中五 T2A3 銜接中六預備培訓"
 ])
 
 # ==================== 分頁一：初中/常規測考追蹤 ====================
@@ -131,7 +132,7 @@ with main_tab1:
 
 # ==================== 分頁二：DSE 成效與相關性分析 ====================
 with main_tab2:
-    st.subheader("🎓 中六測驗 (T1A1)、模擬試 (T1A3) 與 DSE 公開試深度分析")
+    st.subheader("🎓 中六模擬試 (T1A3) 與 DSE 公開試深度分析")
     st.write("上傳中六模擬試成績與 DSE 公開試成績，檢視各主科與選修科之預測效度。")
     
     col_m1, col_m2 = st.columns(2)
@@ -224,103 +225,140 @@ with main_tab2:
     else:
         st.info("💡 請同時上傳中六模擬試成績與 hkdse.xlsx 檔案以啟動分析。")
 
-# ==================== 分頁三：下屆中六 T1A1 早期發掘與培訓 ====================
+# ==================== 分頁三：T1A1 測驗後分析 ====================
 with main_tab3:
-    st.subheader("🔮 下屆中六：測驗 (T1A1) 後早期升大學潛質預測與急救培訓")
-    st.write("在中六 11 月測驗（T1A1）結束後，只需上傳該屆測驗 Excel 檔案，系統即可提早 3~4 個月為學生進行分類並標註科目瓶頸。")
-    
-    t1a1_next_file = st.file_uploader("上傳下屆中六 T1A1 測驗成績 (Excel)", type=["xls", "xlsx"], key="t1a1_next")
-    
+    st.subheader("🔮 中六測驗 (T1A1) 後升學潛質預測")
+    st.write("在中六 11 月測驗（T1A1）結束後上傳檔案進行分析。")
+    t1a1_next_file = st.file_uploader("上傳中六 T1A1 測驗成績 (Excel)", type=["xls", "xlsx"], key="t1a1_next")
     if t1a1_next_file:
         try:
             df_next = pd.read_excel(t1a1_next_file)
-            
-            # 清洗學號並匹配中文名
             if student_info_df is not None:
                 df_next['Reg_No_clean'] = df_next['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
                 df_next = pd.merge(df_next, student_info_df, left_on='Reg_No_clean', right_on='註冊編號_clean', how='left')
             
-            # 清洗 T1A1 分數
             df_next['T1A1_Score_clean'] = pd.to_numeric(df_next['T1A1_Score'], errors='coerce').fillna(0)
             df_next['T1A1_Chi'] = pd.to_numeric(df_next['T1A1_中文_C_Score'], errors='coerce')
             df_next['T1A1_Eng'] = pd.to_numeric(df_next['T1A1_英文_E_Score'], errors='coerce')
             df_next['T1A1_Math'] = pd.to_numeric(df_next['T1A1_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(df_next['T1A1_數必_E_Score'], errors='coerce'))
             
-            # 自動標註輔導建議與瓶頸
             def diagnose_student(row):
-                s = row['T1A1_Score_clean']
-                c = row['T1A1_Chi']
-                e = row['T1A1_Eng']
-                m = row['T1A1_Math']
-                
+                s, c, e, m = row['T1A1_Score_clean'], row['T1A1_Chi'], row['T1A1_Eng'], row['T1A1_Math']
                 notes = []
                 if e < 50: notes.append("🚩 英文瓶頸 (急需衝擊3級)")
                 if c < 45: notes.append("🚩 中文瓶頸 (急需鞏固3級)")
                 if m < 40: notes.append("🚩 數學未達標 (急需拉至合格)")
-                if m >= 60 and (e < 50 or c < 45): notes.append("💡 數理強科偏科生 (避免語文拉低總分)")
+                if m >= 60 and (e < 50 or c < 45): notes.append("💡 數理強科偏科生")
                 
-                # 分類
-                if s >= 50 and c >= 45 and e >= 50 and m >= 40:
-                    cat = "🎓 升大學穩健組 (Aim for 4-5級)"
-                elif s >= 40 or (m >= 55) or (e >= 45) or (c >= 42):
-                    cat = "🎯 邊緣突破培訓組 (重點培訓對象)"
-                else:
-                    cat = "🛟 基礎保底攻堅組 (保5科合格)"
-                    
+                if s >= 50 and c >= 45 and e >= 50 and m >= 40: cat = "🎓 升大學穩健組"
+                elif s >= 40 or (m >= 55) or (e >= 45) or (c >= 42): cat = "🎯 邊緣突破培訓組"
+                else: cat = "🛟 基礎保底攻堅組"
                 return pd.Series([cat, " | ".join(notes) if notes else "全科發展平衡"])
             
             df_next[['培訓類別', '診斷與急救建議']] = df_next.apply(diagnose_student, axis=1)
-            df_next = df_next.sort_values(['*Class', '*Class Number'])
+            st.dataframe(df_next[['*Class', '*Class Number', '*Student Name', 'T1A1_Score_clean', '培訓類別', '診斷與急救建議']], use_container_width=True, hide_index=True)
+        except Exception as e: st.error(f"錯誤: {e}")
+
+# ==================== 分頁四：中五 T2A3 開學前夕銜接培訓 (新功能) ====================
+with main_tab4:
+    st.subheader("☀️ 8月/開學前夕：利用中五 T2A3 年終成績規劃 9-11月 開學前培訓")
+    st.write("上傳中五 T2A3 年終成績 Excel 檔（如 2526_T2A3_s5.xlsx），提前於 8 月暑假鎖定邊緣突破生，利用開學至 11 月測驗前的 10 週進行急救。")
+    
+    s5_file = st.file_uploader("上傳中五 T2A3 年終成績 (Excel)", type=["xls", "xlsx"], key="s5_t2a3")
+    
+    if s5_file:
+        try:
+            df_s5 = pd.read_excel(s5_file)
             
-            # 統計
-            counts = df_next['培訓類別'].value_counts()
+            if student_info_df is not None:
+                df_s5['Reg_No_clean'] = df_s5['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+                df_s5 = pd.merge(df_s5, student_info_df, left_on='Reg_No_clean', right_on='註冊編號_clean', how='left')
             
-            st.success(f"✅ 分析完成！共匯入 {len(df_next)} 位學生測驗成績。")
+            # 清洗中五 T2A3 成績
+            prefix_s5 = 'T2A3'
+            df_s5['S5_Score_clean'] = pd.to_numeric(df_s5[f'{prefix_s5}_Score'], errors='coerce').fillna(0)
+            df_s5['S5_Chi'] = pd.to_numeric(df_s5[f'{prefix_s5}_中文_C_Score'], errors='coerce')
+            df_s5['S5_Eng'] = pd.to_numeric(df_s5[f'{prefix_s5}_英文_E_Score'], errors='coerce')
             
-            # 展示卡片
-            c_a, c_b, c_c = st.columns(3)
-            with c_a: st.metric("🎓 升大學穩健組", f"{counts.get('🎓 升大學穩健組 (Aim for 4-5級)', 0)} 人")
-            with c_b: st.metric("🎯 邊緣突破培訓組 (重點培訓)", f"{counts.get('🎯 邊緣突破培訓組 (重點培訓對象)', 0)} 人")
-            with c_c: st.metric("🛟 基礎保底攻堅組", f"{counts.get('🛟 基礎保底攻堅組 (保5科合格)', 0)} 人")
+            # 數學相容
+            math_col_c = f'{prefix_s5}_數學_C_Score' if f'{prefix_s5}_數學_C_Score' in df_s5.columns else f'{prefix_s5}_數必_C_Score'
+            math_col_e = f'{prefix_s5}_數學_E_Score' if f'{prefix_s5}_數學_E_Score' in df_s5.columns else f'{prefix_s5}_數必_E_Score'
+            
+            df_s5['S5_Math'] = pd.to_numeric(df_s5[math_col_c], errors='coerce') if math_col_c in df_s5.columns else 0
+            if math_col_e in df_s5.columns:
+                df_s5['S5_Math'] = df_s5['S5_Math'].fillna(pd.to_numeric(df_s5[math_col_e], errors='coerce'))
+                
+            # 早期培訓診斷邏輯
+            def s5_diagnose(row):
+                s = row['S5_Score_clean']
+                c = row['S5_Chi']
+                e = row['S5_Eng']
+                m = row['S5_Math']
+                
+                notes = []
+                if e < 50: notes.append("🚩 英文瓶頸 (開學重點補救試卷三)")
+                if c < 45: notes.append("🚩 中文瓶頸 (開學加強範文與審題)")
+                if m < 40: notes.append("🚩 數學未達標 (開學攻克 Paper 1 基礎題)")
+                if m >= 55 and (e < 50 or c < 45): notes.append("💡 數理強科偏科生 (避免語文拉低總分)")
+                
+                if s >= 50 and c >= 45 and e >= 50 and m >= 40:
+                    cat = "🎓 升大學穩健組 (Aim for 4-5級)"
+                elif s >= 40 or (m >= 55) or (e >= 45) or (c >= 42):
+                    cat = "🎯 邊緣突破培訓組 (9-11月重點培訓對象)"
+                else:
+                    cat = "🛟 基礎保底攻堅組 (目標攻克5科合格)"
+                    
+                return pd.Series([cat, " | ".join(notes) if notes else "全科發展平衡，維持節奏"])
+            
+            df_s5[['開學培訓類別', '9-11月急救與培訓建議']] = df_s5.apply(s5_diagnose, axis=1)
+            df_s5 = df_s5.sort_values(['*Class', '*Class Number'])
+            
+            s5_counts = df_s5['開學培訓類別'].value_counts()
+            
+            st.success(f"✅ 成功匯入 {len(df_s5)} 位準中六學生的中五年終成績！")
+            
+            c1, c2, c3 = st.columns(3)
+            with c1: st.metric("🎓 升大學穩健組", f"{s5_counts.get('🎓 升大學穩健組 (Aim for 4-5級)', 0)} 人")
+            with c2: st.metric("🎯 邊緣突破培訓組 (開學黃金培訓)", f"{s5_counts.get('🎯 邊緣突破培訓組 (9-11月重點培訓對象)', 0)} 人")
+            with c3: st.metric("🛟 基礎保底攻堅組", f"{s5_counts.get('🛟 基礎保底攻堅組 (目標攻克5科合格)', 0)} 人")
             
             st.divider()
             
-            # 分頁展示名單
-            tab_n1, tab_n2, tab_n3 = st.tabs(["🎯 邊緣突破培訓組名單 (重點培訓)", "🎓 升大學穩健組名單", "🛟 基礎保底組名單"])
+            tab_s1, tab_s2, tab_s3 = st.tabs(["🎯 邊緣突破培訓組名單 (9-11月開學急救)", "🎓 升大學穩健組名單", "🛟 基礎保底組名單"])
             
-            disp_next_cols = ['*Class', '*Class Number']
-            rename_next = {'*Class': '班別', '*Class Number': '班號'}
+            disp_s5_cols = ['*Class', '*Class Number']
+            rename_s5 = {'*Class': '班別', '*Class Number': '班號'}
             
-            if '中文姓名' in df_next.columns:
-                disp_next_cols.extend(['中文姓名', '*Student Name'])
-                rename_next['中文姓名'] = '中文姓名'
-                rename_next['*Student Name'] = '英文姓名'
+            if '中文姓名' in df_s5.columns:
+                disp_s5_cols.extend(['中文姓名', '*Student Name'])
+                rename_s5['中文姓名'] = '中文姓名'
+                rename_s5['*Student Name'] = '英文姓名'
             else:
-                disp_next_cols.append('*Student Name')
-                rename_next['*Student Name'] = '姓名'
+                disp_s5_cols.append('*Student Name')
+                rename_s5['*Student Name'] = '姓名'
                 
-            disp_next_cols.extend(['T1A1_Score_clean', 'T1A1_Chi', 'T1A1_Eng', 'T1A1_Math', '診斷與急救建議'])
-            rename_next.update({
-                'T1A1_Score_clean': '測驗平均分',
-                'T1A1_Chi': '中文分數',
-                'T1A1_Eng': '英文分數',
-                'T1A1_Math': '數學分數'
+            disp_s5_cols.extend(['S5_Score_clean', 'S5_Chi', 'S5_Eng', 'S5_Math', '9-11月急救與培訓建議'])
+            rename_s5.update({
+                'S5_Score_clean': 'S5年終平均分',
+                'S5_Chi': 'S5中文分數',
+                'S5_Eng': 'S5英文分數',
+                'S5_Math': 'S5數學分數'
             })
             
-            with tab_n2:
-                df_cat_a = df_next[df_next['培訓類別'].str.contains("穩健組")]
-                st.dataframe(df_cat_a[disp_next_cols].rename(columns=rename_next), use_container_width=True, hide_index=True)
+            with tab_s1:
+                st.info("📌 建議：利用 9月開學至 11月測驗前 的 10 週時間，針對以下同學的標註瓶頸科進行課後專題急救。")
+                df_s5_b = df_s5[df_s5['開學培訓類別'].str.contains("邊緣突破")]
+                st.dataframe(df_s5_b[disp_s5_cols].rename(columns=rename_s5), use_container_width=True, hide_index=True)
                 
-            with tab_n1:
-                st.info("💡 提醒：此組學生最具備提升空間，建議於 12月 至 2月 模擬試前安排專題急救補習。")
-                df_cat_b = df_next[df_next['培訓類別'].str.contains("邊緣突破")]
-                st.dataframe(df_cat_b[disp_next_cols].rename(columns=rename_next), use_container_width=True, hide_index=True)
+            with tab_s2:
+                df_s5_a = df_s5[df_s5['開學培訓類別'].str.contains("穩健組")]
+                st.dataframe(df_s5_a[disp_s5_cols].rename(columns=rename_dict if 'rename_dict' in locals() else rename_s5), use_container_width=True, hide_index=True)
                 
-            with tab_n3:
-                df_cat_c = df_next[df_next['培訓類別'].str.contains("保底")]
-                st.dataframe(df_cat_c[disp_next_cols].rename(columns=rename_next), use_container_width=True, hide_index=True)
+            with tab_s3:
+                df_s5_c = df_s5[df_s5['開學培訓類別'].str.contains("保底")]
+                st.dataframe(df_s5_c[disp_s5_cols].rename(columns=rename_s5), use_container_width=True, hide_index=True)
 
         except Exception as e:
             st.error(f"檔案讀取錯誤: {e}")
     else:
-        st.info("💡 請上傳下屆中六 T1A1 測驗 Excel 檔以啟動早期培訓診斷。")
+        st.info("💡 請上傳中五 T2A3 年終成績 Excel 檔以產生 9-11 月開學培訓計畫。")
