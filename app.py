@@ -39,15 +39,14 @@ def load_student_info():
             st.warning(f"讀取 {file_path} 發生錯誤。訊息: {e}")
     return None
 
-# 設定網頁標題與排版
 st.set_page_config(page_title="學生成績與公開試分析系統", layout="wide")
 st.title("📊 學生成績追蹤與公開試分析系統")
 
 student_info_df = load_student_info()
 
-# 建立多分頁架構：支援初中追蹤與中六 DSE 分析
 main_tab1, main_tab2 = st.tabs(["📚 初中/常規測考追蹤分析", "🎓 中六公開試 (DSE) 成效、相關性與大學門檻分析"])
 
+# === 分頁一：常規測考追蹤 ===
 with main_tab1:
     st.write("上傳 數據1 與 數據2 的 Excel 檔案，系統將自動為學生進行分類。")
     col1, col2 = st.columns(2)
@@ -57,7 +56,6 @@ with main_tab1:
         file2 = st.file_uploader("上傳 數據2 (Excel)", type=["xls", "xlsx"], key="f2")
 
     st.sidebar.header("⚙️ 篩選門檻設定 (常規)")
-    # 已將預設值調整為 60.0
     target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=60.0)
     core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=60.0)
     underperform_cap = st.sidebar.number_input("進步/保底：平均分上限", value=50.0)
@@ -130,6 +128,7 @@ with main_tab1:
     else:
         st.info("💡 請上傳兩個常規成績檔案。")
 
+# === 分頁二：DSE 成效與門檻對照 ===
 with main_tab2:
     st.subheader("🎓 中六模擬試與 DSE 公開試深度分析（含大學入學門檻對照）")
     st.write("上傳中六模擬試成績 (如 2526_T1A3_s6.xlsx) 與實際公開試成績 (hkdse.xlsx)，系統將自動進行相關係數分析並檢核大學收生門檻（中 $\ge 3$、英 $\ge 3$、數 $\ge 2$）。")
@@ -159,37 +158,38 @@ with main_tab2:
             
             merged_dse['Met_U_Req'] = (merged_dse['DSE_Chi_Lvl'] >= 3) & (merged_dse['DSE_Eng_Lvl'] >= 3) & (merged_dse['DSE_Math_Lvl'] >= 2)
             
+            # 科目對應地圖：包含中文組（_C）與英文組（_E）自動補全機制
             subjects_map = [
-                ('中文', 'T1A3_中文_C_Score', 'A010 Chinese'),
-                ('英文', 'T1A3_英文_E_Score', 'A020 English'),
-                ('數學必修', 'T1A3_數必_C_Score', 'A030 Math Compulsory'),
-                ('數學 M1 (數1)', 'T1A3_數一_C_Score', 'A031 M1'),
-                ('企業會計與財務概論 (企財/BAFS)', 'T1A3_企財_C_Score', 'A171 BAFS(Accounting)'),
-                ('資訊及通訊科技 (資通/ICT)', 'T1A3_資通_C_Score', 'A200 ICT'),
-                ('視覺藝術 (視憑/Visual Arts)', 'T1A3_視憑_C_Score', 'A230 Visual Arts'),
-                ('倫理與宗教 (倫教/ERS)', 'T1A3_倫教_C_Score', 'A090 Ethics and Religious Studies'),
-                ('物理', 'T1A3_物理_C_Score', 'A150 Physics'),
-                ('化學', 'T1A3_化學_C_Score', 'A140 Chemistry'),
-                ('生物', 'T1A3_生物_C_Score', 'A130 Biology'),
-                ('經濟', 'T1A3_經濟_C_Score', 'A080 Economics'),
-                ('地理', 'T1A3_地理_C_Score', 'A100 Geography'),
-                ('歷史', 'T1A3_歷史_C_Score', 'A110 History')
+                ('中文', ['T1A3_中文_C_Score'], 'A010 Chinese'),
+                ('英文', ['T1A3_英文_E_Score'], 'A020 English'),
+                ('數學必修', ['T1A3_數必_C_Score', 'T1A3_數必_E_Score'], 'A030 Math Compulsory'),
+                ('數學 M1 (數1)', ['T1A3_數一_C_Score', 'T1A3_數一_E_Score'], 'A031 M1'),
+                ('生物', ['T1A3_生物_C_Score', 'T1A3_生物_E_Score'], 'A130 Biology'),
+                ('化學', ['T1A3_化學_C_Score', 'T1A3_化學_E_Score'], 'A140 Chemistry'),
+                ('物理', ['T1A3_物理_C_Score', 'T1A3_物理_E_Score'], 'A150 Physics'),
+                ('企業會計與財務概論 (企財/BAFS)', ['T1A3_企財_C_Score'], 'A171 BAFS(Accounting)'),
+                ('資訊及通訊科技 (資通/ICT)', ['T1A3_資通_C_Score'], 'A200 ICT'),
+                ('視覺藝術 (視憑/Visual Arts)', ['T1A3_視憑_C_Score'], 'A230 Visual Arts'),
+                ('倫理與宗教 (倫教/ERS)', ['T1A3_倫教_C_Score'], 'A090 Ethics and Religious Studies'),
+                ('經濟', ['T1A3_經濟_C_Score'], 'A080 Economics'),
+                ('地理', ['T1A3_地理_C_Score'], 'A100 Geography'),
+                ('歷史', ['T1A3_歷史_C_Score'], 'A110 History'),
+                ('中史', ['T1A3_中史_C_Score'], 'A070 Chinese History')
             ]
             
             corr_results = []
-            for name, m_col, d_col in subjects_map:
-                if m_col in merged_dse.columns and d_col in merged_dse.columns:
-                    if name == '數學必修':
-                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse['T1A3_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數必_E_Score'], errors='coerce'))
-                    elif name == '數學 M1 (數1)':
-                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse['T1A3_數一_C_Score'], errors='coerce').fillna(pd.to_numeric(merged_dse['T1A3_數一_E_Score'], errors='coerce'))
-                    else:
-                        merged_dse['Temp_M'] = pd.to_numeric(merged_dse[m_col], errors='coerce')
-                        
-                    merged_dse['Temp_D'] = merged_dse[d_col].apply(grade_to_level)
-                    sub_c = merged_dse[['Temp_M', 'Temp_D']].dropna()
+            for name, m_cols, d_col in subjects_map:
+                mock_series = None
+                for mc in m_cols:
+                    if mc in merged_dse.columns:
+                        s = pd.to_numeric(merged_dse[mc], errors='coerce')
+                        mock_series = s if mock_series is None else mock_series.fillna(s)
+                
+                if mock_series is not None and d_col in merged_dse.columns:
+                    dse_series = merged_dse[d_col].apply(grade_to_level)
+                    sub_c = pd.DataFrame({'Mock': mock_series, 'DSE': dse_series}).dropna()
                     if len(sub_c) > 2:
-                        r = sub_c['Temp_M'].corr(sub_c['Temp_D'])
+                        r = sub_c['Mock'].corr(sub_c['DSE'])
                         corr_results.append({'科目': name, '有效樣本數': len(sub_c), '相關係數 (r)': round(r, 3)})
             
             st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生的公開試與模擬試數據！其中達到大學基本收生要求（中3、英3、數2）共 **{merged_dse['Met_U_Req'].sum()}** 人。")
