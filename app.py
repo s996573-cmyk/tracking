@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+from sklearn.tree import DecisionTreeClassifier
 
 # 處理文字名次
 def extract_rank(val):
@@ -36,39 +37,49 @@ def load_student_info():
             st.warning(f"讀取 {file_path} 發生錯誤。訊息: {e}")
     return None
 
-st.set_page_config(page_title="學生成績與公開試分析系統", layout="wide")
-st.title("📊 學生成績追蹤與公開試分析系統")
+st.set_page_config(page_title="學生成績與公開試預測系統", layout="wide")
+st.title("📊 學生成績追蹤、數據建模與公開試預測系統")
 
 student_info_df = load_student_info()
 
-main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
     "📚 初中/常規測考追蹤分析", 
-    "🎓 中六公開試 (DSE) 成效與相關性分析", 
-    "🔮 下屆中六測驗 (T1A1) 升學潛質預測",
-    "☀️ 開學前夕：中五 T2A3 銜接中六預備培訓"
+    "🎓 中六公開試 (DSE) 成效分析", 
+    "🔮 中六測驗 (T1A1) 升學潛質預測",
+    "☀️ 中五 (未來中六)：大學 (332) 與大專 (222) 分析",
+    "🤖 跨學年數據建模與下屆預測"
 ])
+
+# 側邊欄設定
+st.sidebar.header("⚙️ 常規測考門檻設定")
+target_score = st.sidebar.number_input("常規：數據2平均分門檻", value=60.0)
+core_pass = st.sidebar.number_input("常規：中英數及格線", value=60.0)
+underperform_cap = st.sidebar.number_input("常規：進步/保底平均分上限", value=50.0)
+progress_score = st.sidebar.number_input("常規：分數提升門檻", value=3.0)
+
+st.sidebar.header("⚙️ 中五/未來中六門檻設定")
+s5_u_score = st.sidebar.number_input("大學 (332) 平均分門檻", value=50.0)
+s5_u_chi = st.sidebar.number_input("大學 (332) 中文門檻", value=45.0)
+s5_u_eng = st.sidebar.number_input("大學 (332) 英文門檻", value=50.0)
+s5_u_math = st.sidebar.number_input("大學 (332) 數學門檻", value=40.0)
+
+s5_sub_score = st.sidebar.number_input("大專 (222) 平均分門檻", value=40.0)
+s5_sub_chi = st.sidebar.number_input("大專 (222) 中文門檻", value=38.0)
+s5_sub_eng = st.sidebar.number_input("大專 (222) 英文門檻", value=35.0)
+s5_sub_math = st.sidebar.number_input("大專 (222) 數學門檻", value=35.0)
 
 # ==================== 分頁一：初中/常規測考追蹤 ====================
 with main_tab1:
     st.write("上傳 數據1 與 數據2 的 Excel 檔案，系統將自動為學生進行分類。")
     col1, col2 = st.columns(2)
-    with col1:
-        file1 = st.file_uploader("上傳 數據1 (Excel)", type=["xls", "xlsx"], key="f1")
-    with col2:
-        file2 = st.file_uploader("上傳 數據2 (Excel)", type=["xls", "xlsx"], key="f2")
-
-    st.sidebar.header("⚙️ 篩選門檻設定 (常規)")
-    target_score = st.sidebar.number_input("潛質大學：數據2平均分門檻", value=60.0)
-    core_pass = st.sidebar.number_input("潛質大學：中英數及格線", value=60.0)
-    underperform_cap = st.sidebar.number_input("進步/保底：平均分上限", value=50.0)
-    progress_score = st.sidebar.number_input("進步：分數提升門檻", value=3.0)
+    with col1: file1 = st.file_uploader("上傳 數據1 (Excel)", type=["xls", "xlsx"], key="f1")
+    with col2: file2 = st.file_uploader("上傳 數據2 (Excel)", type=["xls", "xlsx"], key="f2")
 
     if file1 and file2:
         try:
             with st.spinner('資料處理中...'):
                 df1 = pd.read_excel(file1)
                 df2 = pd.read_excel(file2)
-                
                 merged = pd.merge(df1, df2, on=['*School Year', '*Class Level', '*Class', '*Class Number', '*Student Name', '*Reg. No.'], suffixes=('_D1', '_D2'))
                 
                 if student_info_df is not None:
@@ -112,123 +123,46 @@ with main_tab1:
                     rename_dict['*Student Name'] = '姓名'
                     
                 display_cols.extend(['D2_Score_clean', f'{prefix2}_OMF', 'D2_Chi', 'D2_Eng', 'D2_Math', 'Score_Diff_clean'])
-                rename_dict.update({
-                    'D2_Score_clean': '數據2平均分', f'{prefix2}_OMF': '全級名次(OMF)', 
-                    'D2_Chi': '中文', 'D2_Eng': '英文', 'D2_Math': '數學', 'Score_Diff_clean': '與數據1分差'
-                })
+                rename_dict.update({'D2_Score_clean': '數據2平均分', f'{prefix2}_OMF': '全級名次(OMF)', 'D2_Chi': '中文', 'D2_Eng': '英文', 'D2_Math': '數學', 'Score_Diff_clean': '與數據1分差'})
                 
                 st.success("✅ 數據合併與分析成功！")
                 tab1, tab2, tab3 = st.tabs(["🎓 潛質升大學名單", "📈 具進步空間名單", "🛟 保底支援名單"])
-                with tab1:
-                    st.dataframe(cat1[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
-                with tab2:
-                    st.dataframe(cat2[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
-                with tab3:
-                    st.dataframe(cat3[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.error(f"錯誤: {e}")
-    else:
-        st.info("💡 請上傳兩個常規成績檔案。")
+                with tab1: st.dataframe(cat1[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
+                with tab2: st.dataframe(cat2[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
+                with tab3: st.dataframe(cat3[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
+        except Exception as e: st.error(f"錯誤: {e}")
+    else: st.info("💡 請上傳兩個常規成績檔案。")
 
-# ==================== 分頁二：DSE 成效與相關性分析 ====================
+# ==================== 分頁二：DSE 成效分析 ====================
 with main_tab2:
     st.subheader("🎓 中六模擬試 (T1A3) 與 DSE 公開試深度分析")
-    st.write("上傳中六模擬試成績與 DSE 公開試成績，檢視各主科與選修科之預測效度。")
-    
     col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        mock_file = st.file_uploader("上傳中六模擬試成績 (Excel)", type=["xls", "xlsx"], key="mock_up")
-    with col_m2:
-        dse_file = st.file_uploader("上傳 DSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="dse_up")
+    with col_m1: mock_file = st.file_uploader("上傳中六模擬試成績 (Excel)", type=["xls", "xlsx"], key="mock_up")
+    with col_m2: dse_file = st.file_uploader("上傳 DSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="dse_up")
         
     if mock_file and dse_file:
         try:
             df_mock = pd.read_excel(mock_file)
             df_dse = pd.read_excel(dse_file)
-            
             df_mock['Reg_Clean'] = df_mock['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
             df_dse['Reg_Clean'] = df_dse['Registration No.'].astype(str).str.strip()
             
             merged_dse = pd.merge(df_mock, df_dse, on='Reg_Clean', how='inner')
-            
             if student_info_df is not None:
                 merged_dse = pd.merge(merged_dse, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
                 
             merged_dse['DSE_Chi_Lvl'] = merged_dse['A010 Chinese'].apply(grade_to_level)
             merged_dse['DSE_Eng_Lvl'] = merged_dse['A020 English'].apply(grade_to_level)
             merged_dse['DSE_Math_Lvl'] = merged_dse['A030 Math Compulsory'].apply(grade_to_level)
-            
             merged_dse['Met_U_Req'] = (merged_dse['DSE_Chi_Lvl'] >= 3) & (merged_dse['DSE_Eng_Lvl'] >= 3) & (merged_dse['DSE_Math_Lvl'] >= 2)
             
-            subjects_map = [
-                ('中文', ['T1A3_中文_C_Score'], 'A010 Chinese'),
-                ('英文', ['T1A3_英文_E_Score'], 'A020 English'),
-                ('數學必修', ['T1A3_數必_C_Score', 'T1A3_數必_E_Score'], 'A030 Math Compulsory'),
-                ('數學 M1 (數1)', ['T1A3_數一_C_Score', 'T1A3_數一_E_Score'], 'A031 M1'),
-                ('生物', ['T1A3_生物_C_Score', 'T1A3_生物_E_Score'], 'A130 Biology'),
-                ('化學', ['T1A3_化學_C_Score', 'T1A3_化學_E_Score'], 'A140 Chemistry'),
-                ('物理', ['T1A3_物理_C_Score', 'T1A3_物理_E_Score'], 'A150 Physics'),
-                ('企業會計與財務概論 (企財/BAFS)', ['T1A3_企財_C_Score'], 'A171 BAFS(Accounting)'),
-                ('資訊及通訊科技 (資通/ICT)', ['T1A3_資通_C_Score'], 'A200 ICT'),
-                ('視覺藝術 (視憑/Visual Arts)', ['T1A3_視憑_C_Score'], 'A230 Visual Arts'),
-                ('倫理與宗教 (倫教/ERS)', ['T1A3_倫教_C_Score'], 'A090 Ethics and Religious Studies'),
-                ('經濟', ['T1A3_經濟_C_Score'], 'A080 Economics'),
-                ('地理', ['T1A3_地理_C_Score'], 'A100 Geography'),
-                ('歷史', ['T1A3_歷史_C_Score'], 'A110 History'),
-                ('中史', ['T1A3_中史_C_Score'], 'A070 Chinese History')
-            ]
-            
-            corr_results = []
-            for name, m_cols, d_col in subjects_map:
-                mock_series = None
-                for mc in m_cols:
-                    if mc in merged_dse.columns:
-                        s = pd.to_numeric(merged_dse[mc], errors='coerce')
-                        mock_series = s if mock_series is None else mock_series.fillna(s)
-                
-                if mock_series is not None and d_col in merged_dse.columns:
-                    dse_series = merged_dse[d_col].apply(grade_to_level)
-                    sub_c = pd.DataFrame({'Mock': mock_series, 'DSE': dse_series}).dropna()
-                    if len(sub_c) > 2:
-                        r = sub_c['Mock'].corr(sub_c['DSE'])
-                        corr_results.append({'科目': name, '有效樣本數': len(sub_c), '相關係數 (r)': round(r, 3)})
-            
-            st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生的公開試與模擬試數據！其中達到大學基本收生要求（中3、英3、數2）共 **{merged_dse['Met_U_Req'].sum()}** 人。")
-            
-            st.markdown("### 📈 各主科模擬試成績與 DSE 實際等級相關係數")
-            if corr_results:
-                st.dataframe(pd.DataFrame(corr_results), use_container_width=True, hide_index=True)
-            
-            st.markdown("### 📋 學生模擬試表現與 DSE 大學門檻達標對照表")
-            display_dse_cols = ['Class', 'Class No.']
-            dse_rename = {'Class': '班別', 'Class No.': '班號'}
-            
-            if '中文姓名' in merged_dse.columns:
-                display_dse_cols.append('中文姓名')
-                dse_rename['中文姓名'] = '中文姓名'
-            display_dse_cols.append('Name')
-            dse_rename['Name'] = '英文姓名'
-            
-            display_dse_cols.extend(['T1A3_Score', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory', 'Met_U_Req'])
-            dse_rename.update({
-                'T1A3_Score': '模擬試總平均分',
-                'A010 Chinese': 'DSE中文',
-                'A020 English': 'DSE英文',
-                'A030 Math Compulsory': 'DSE數學',
-                'Met_U_Req': '達大學基本門檻(中3英3數2)'
-            })
-            
-            st.dataframe(merged_dse[display_dse_cols].rename(columns=dse_rename), use_container_width=True, hide_index=True)
-            
-        except Exception as e:
-            st.error(f"DSE 檔案處理發生錯誤: {e}")
-    else:
-        st.info("💡 請同時上傳中六模擬試成績與 hkdse.xlsx 檔案以啟動分析。")
+            st.success(f"✅ 成功配對 {len(merged_dse)} 位中六學生公開試數據！其中達到大學基本收生門檻（中3英3數2）共 {merged_dse['Met_U_Req'].sum()} 人。")
+            st.dataframe(merged_dse[['Class', 'Class No.', 'Name', 'T1A3_Score', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory', 'Met_U_Req']], use_container_width=True, hide_index=True)
+        except Exception as e: st.error(f"錯誤: {e}")
 
-# ==================== 分頁三：T1A1 測驗後分析 ====================
+# ==================== 分頁三：中六 T1A1 測驗預測 ====================
 with main_tab3:
     st.subheader("🔮 中六測驗 (T1A1) 後升學潛質預測")
-    st.write("在中六 11 月測驗（T1A1）結束後上傳檔案進行分析。")
     t1a1_next_file = st.file_uploader("上傳中六 T1A1 測驗成績 (Excel)", type=["xls", "xlsx"], key="t1a1_next")
     if t1a1_next_file:
         try:
@@ -245,10 +179,9 @@ with main_tab3:
             def diagnose_student(row):
                 s, c, e, m = row['T1A1_Score_clean'], row['T1A1_Chi'], row['T1A1_Eng'], row['T1A1_Math']
                 notes = []
-                if e < 50: notes.append("🚩 英文瓶頸 (急需衝擊3級)")
-                if c < 45: notes.append("🚩 中文瓶頸 (急需鞏固3級)")
-                if m < 40: notes.append("🚩 數學未達標 (急需拉至合格)")
-                if m >= 60 and (e < 50 or c < 45): notes.append("💡 數理強科偏科生")
+                if e < 50: notes.append("🚩 英文瓶頸")
+                if c < 45: notes.append("🚩 中文瓶頸")
+                if m < 40: notes.append("🚩 數學未達標")
                 
                 if s >= 50 and c >= 45 and e >= 50 and m >= 40: cat = "🎓 升大學穩健組"
                 elif s >= 40 or (m >= 55) or (e >= 45) or (c >= 42): cat = "🎯 邊緣突破培訓組"
@@ -259,106 +192,133 @@ with main_tab3:
             st.dataframe(df_next[['*Class', '*Class Number', '*Student Name', 'T1A1_Score_clean', '培訓類別', '診斷與急救建議']], use_container_width=True, hide_index=True)
         except Exception as e: st.error(f"錯誤: {e}")
 
-# ==================== 分頁四：中五 T2A3 開學前夕銜接培訓 (新功能) ====================
+# ==================== 分頁四：中五 (未來中六) 大學與大專分析 ====================
 with main_tab4:
-    st.subheader("☀️ 8月/開學前夕：利用中五 T2A3 年終成績規劃 9-11月 開學前培訓")
-    st.write("上傳中五 T2A3 年終成績 Excel 檔（如 2526_T2A3_s5.xlsx），提前於 8 月暑假鎖定邊緣突破生，利用開學至 11 月測驗前的 10 週進行急救。")
-    
+    st.subheader("☀️ 中五 (未來中六)：大學 (332) 與大專 (222) 潛質分析")
     s5_file = st.file_uploader("上傳中五 T2A3 年終成績 (Excel)", type=["xls", "xlsx"], key="s5_t2a3")
-    
     if s5_file:
         try:
             df_s5 = pd.read_excel(s5_file)
-            
             if student_info_df is not None:
                 df_s5['Reg_No_clean'] = df_s5['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
                 df_s5 = pd.merge(df_s5, student_info_df, left_on='Reg_No_clean', right_on='註冊編號_clean', how='left')
             
-            # 清洗中五 T2A3 成績
             prefix_s5 = 'T2A3'
             df_s5['S5_Score_clean'] = pd.to_numeric(df_s5[f'{prefix_s5}_Score'], errors='coerce').fillna(0)
             df_s5['S5_Chi'] = pd.to_numeric(df_s5[f'{prefix_s5}_中文_C_Score'], errors='coerce')
             df_s5['S5_Eng'] = pd.to_numeric(df_s5[f'{prefix_s5}_英文_E_Score'], errors='coerce')
-            
-            # 數學相容
             math_col_c = f'{prefix_s5}_數學_C_Score' if f'{prefix_s5}_數學_C_Score' in df_s5.columns else f'{prefix_s5}_數必_C_Score'
             math_col_e = f'{prefix_s5}_數學_E_Score' if f'{prefix_s5}_數學_E_Score' in df_s5.columns else f'{prefix_s5}_數必_E_Score'
-            
             df_s5['S5_Math'] = pd.to_numeric(df_s5[math_col_c], errors='coerce') if math_col_c in df_s5.columns else 0
-            if math_col_e in df_s5.columns:
-                df_s5['S5_Math'] = df_s5['S5_Math'].fillna(pd.to_numeric(df_s5[math_col_e], errors='coerce'))
+            if math_col_e in df_s5.columns: df_s5['S5_Math'] = df_s5['S5_Math'].fillna(pd.to_numeric(df_s5[math_col_e], errors='coerce'))
                 
-            # 早期培訓診斷邏輯
-            def s5_diagnose(row):
-                s = row['S5_Score_clean']
-                c = row['S5_Chi']
-                e = row['S5_Eng']
-                m = row['S5_Math']
-                
+            def s5_classify_and_diagnose(row):
+                s, c, e, m = row['S5_Score_clean'], row['S5_Chi'], row['S5_Eng'], row['S5_Math']
                 notes = []
-                if e < 50: notes.append("🚩 英文瓶頸 (開學重點補救試卷三)")
-                if c < 45: notes.append("🚩 中文瓶頸 (開學加強範文與審題)")
-                if m < 40: notes.append("🚩 數學未達標 (開學攻克 Paper 1 基礎題)")
-                if m >= 55 and (e < 50 or c < 45): notes.append("💡 數理強科偏科生 (避免語文拉低總分)")
+                if e < s5_u_eng and e >= s5_sub_eng: notes.append("🚩 英文瓶頸 (衝擊3級)")
+                elif e < s5_sub_eng: notes.append("⚠️ 英文急救 (補救至2級)")
+                if c < s5_u_chi and c >= s5_sub_chi: notes.append("🚩 中文瓶頸 (衝擊3級)")
+                elif c < s5_sub_chi: notes.append("⚠️ 中文急救 (補救至2級)")
+                if m < s5_u_math: notes.append("🚩 數學未達標")
                 
-                if s >= 50 and c >= 45 and e >= 50 and m >= 40:
-                    cat = "🎓 升大學穩健組 (Aim for 4-5級)"
-                elif s >= 40 or (m >= 55) or (e >= 45) or (c >= 42):
-                    cat = "🎯 邊緣突破培訓組 (9-11月重點培訓對象)"
-                else:
-                    cat = "🛟 基礎保底攻堅組 (目標攻克5科合格)"
-                    
-                return pd.Series([cat, " | ".join(notes) if notes else "全科發展平衡，維持節奏"])
+                if s >= s5_u_score and c >= s5_u_chi and e >= s5_u_eng and m >= s5_u_math: cat = "🎓 潛質入大學名單 (目標 332)"
+                elif s >= s5_sub_score and c >= s5_sub_chi and e >= s5_sub_eng and m >= s5_sub_math: cat = "🏫 潛質入大專名單 (目標 222)"
+                else: cat = "🛟 基礎保底加強組"
+                return pd.Series([cat, " | ".join(notes) if notes else "全科均衡"])
             
-            df_s5[['開學培訓類別', '9-11月急救與培訓建議']] = df_s5.apply(s5_diagnose, axis=1)
-            df_s5 = df_s5.sort_values(['*Class', '*Class Number'])
+            df_s5[['升學類別', '培訓與急救建議']] = df_s5.apply(s5_classify_and_diagnose, axis=1)
+            st.dataframe(df_s5[['*Class', '*Class Number', '*Student Name', 'S5_Score_clean', 'S5_Chi', 'S5_Eng', 'S5_Math', '升學類別', '培訓與急救建議']], use_container_width=True, hide_index=True)
+        except Exception as e: st.error(f"錯誤: {e}")
+
+# ==================== 分頁五：跨學年機器學習建模與預測 (新功能) ====================
+with main_tab5:
+    st.subheader("🤖 本屆中六 (S4-S6) 機器學習數據建模與下屆升學概率預測")
+    st.write("上傳本屆中六的中四至中六歷年成績與 DSE 數據訓練 AI 模型，並輸入下屆中六歷年數據進行自動預測。")
+    
+    col_t1, col_t2, col_t3 = st.columns(3)
+    with col_t1: m_t1a1 = st.file_uploader("1. 上傳本屆 S6 T1A1 測驗", type=["xls", "xlsx"], key="m_t1a1")
+    with col_t2: m_t1a3 = st.file_uploader("2. 上傳本屆 S6 T1A3 模擬試", type=["xls", "xlsx"], key="m_t1a3")
+    with col_t3: m_dse = st.file_uploader("3. 上傳本屆 DSE 成績", type=["xls", "xlsx"], key="m_dse")
+    
+    if m_t1a1 and m_t1a3 and m_dse:
+        try:
+            d1 = pd.read_excel(m_t1a1)
+            d2 = pd.read_excel(m_t1a3)
+            d3 = pd.read_excel(m_dse)
             
-            s5_counts = df_s5['開學培訓類別'].value_counts()
+            d1['Reg_Clean'] = d1['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+            d2['Reg_Clean'] = d2['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+            d3['Reg_Clean'] = d3['Registration No.'].astype(str).str.strip()
             
-            st.success(f"✅ 成功匯入 {len(df_s5)} 位準中六學生的中五年終成績！")
+            m_all = pd.merge(d1, d2, on='Reg_Clean', suffixes=('_T1A1', '_T1A3'))
+            m_all = pd.merge(m_all, d3, on='Reg_Clean')
             
-            c1, c2, c3 = st.columns(3)
-            with c1: st.metric("🎓 升大學穩健組", f"{s5_counts.get('🎓 升大學穩健組 (Aim for 4-5級)', 0)} 人")
-            with c2: st.metric("🎯 邊緣突破培訓組 (開學黃金培訓)", f"{s5_counts.get('🎯 邊緣突破培訓組 (9-11月重點培訓對象)', 0)} 人")
-            with c3: st.metric("🛟 基礎保底攻堅組", f"{s5_counts.get('🛟 基礎保底攻堅組 (目標攻克5科合格)', 0)} 人")
+            m_all['DSE_Chi'] = m_all['A010 Chinese'].apply(grade_to_level)
+            m_all['DSE_Eng'] = m_all['A020 English'].apply(grade_to_level)
+            m_all['DSE_Math'] = m_all['A030 Math Compulsory'].apply(grade_to_level)
+            m_all['Target_332'] = ((m_all['DSE_Chi'] >= 3) & (m_all['DSE_Eng'] >= 3) & (m_all['DSE_Math'] >= 2)).astype(int)
+            
+            # 建立訓練特徵
+            m_all['T1A1_Score_num'] = pd.to_numeric(m_all['T1A1_Score'], errors='coerce')
+            m_all['T1A1_Chi_num'] = pd.to_numeric(m_all['T1A1_中文_C_Score'], errors='coerce')
+            m_all['T1A1_Eng_num'] = pd.to_numeric(m_all['T1A1_英文_E_Score'], errors='coerce')
+            m_all['T1A1_Math_num'] = pd.to_numeric(m_all['T1A1_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(m_all['T1A1_數必_E_Score'], errors='coerce'))
+            
+            m_all['T1A3_Score_num'] = pd.to_numeric(m_all['T1A3_Score'], errors='coerce')
+            m_all['T1A3_Chi_num'] = pd.to_numeric(m_all['T1A3_中文_C_Score'], errors='coerce')
+            m_all['T1A3_Eng_num'] = pd.to_numeric(m_all['T1A3_英文_E_Score'], errors='coerce')
+            m_all['T1A3_Math_num'] = pd.to_numeric(m_all['T1A3_數必_C_Score'], errors='coerce').fillna(pd.to_numeric(m_all['T1A3_數必_E_Score'], errors='coerce'))
+            
+            m_all['Score_Diff'] = m_all['T1A3_Score_num'] - m_all['T1A1_Score_num']
+            
+            features = ['T1A1_Score_num', 'T1A1_Chi_num', 'T1A1_Eng_num', 'T1A1_Math_num', 
+                        'T1A3_Score_num', 'T1A3_Chi_num', 'T1A3_Eng_num', 'T1A3_Math_num', 'Score_Diff']
+            
+            df_train = m_all.dropna(subset=features + ['Target_332'])
+            
+            clf = DecisionTreeClassifier(max_depth=3, random_state=42)
+            clf.fit(df_train[features], df_train['Target_332'])
+            
+            st.success(f"🎉 數據模型訓練成功！訓練樣本數：{len(df_train)} 人，模型的關鍵特徵權重如下：")
+            
+            feat_imp = pd.DataFrame({'特徵指標': features, '對 DSE 332 的影響權重': clf.feature_importances_}).sort_values('對 DSE 332 的影響權重', ascending=False)
+            st.dataframe(feat_imp, use_container_width=True, hide_index=True)
             
             st.divider()
+            st.markdown("### 🔮 下載/套用模型預測下屆中六")
+            next_cohort_file = st.file_uploader("4. 上傳下屆中六成績檔 (含測驗/模擬試分數)", type=["xls", "xlsx"], key="next_cohort")
             
-            tab_s1, tab_s2, tab_s3 = st.tabs(["🎯 邊緣突破培訓組名單 (9-11月開學急救)", "🎓 升大學穩健組名單", "🛟 基礎保底組名單"])
-            
-            disp_s5_cols = ['*Class', '*Class Number']
-            rename_s5 = {'*Class': '班別', '*Class Number': '班號'}
-            
-            if '中文姓名' in df_s5.columns:
-                disp_s5_cols.extend(['中文姓名', '*Student Name'])
-                rename_s5['中文姓名'] = '中文姓名'
-                rename_s5['*Student Name'] = '英文姓名'
-            else:
-                disp_s5_cols.append('*Student Name')
-                rename_s5['*Student Name'] = '姓名'
+            if next_cohort_file:
+                df_pred = pd.read_excel(next_cohort_file)
+                if student_info_df is not None:
+                    df_pred['Reg_No_clean'] = df_pred['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+                    df_pred = pd.merge(df_pred, student_info_df, left_on='Reg_No_clean', right_on='註冊編號_clean', how='left')
                 
-            disp_s5_cols.extend(['S5_Score_clean', 'S5_Chi', 'S5_Eng', 'S5_Math', '9-11月急救與培訓建議'])
-            rename_s5.update({
-                'S5_Score_clean': 'S5年終平均分',
-                'S5_Chi': 'S5中文分數',
-                'S5_Eng': 'S5英文分數',
-                'S5_Math': 'S5數學分數'
-            })
-            
-            with tab_s1:
-                st.info("📌 建議：利用 9月開學至 11月測驗前 的 10 週時間，針對以下同學的標註瓶頸科進行課後專題急救。")
-                df_s5_b = df_s5[df_s5['開學培訓類別'].str.contains("邊緣突破")]
-                st.dataframe(df_s5_b[disp_s5_cols].rename(columns=rename_s5), use_container_width=True, hide_index=True)
+                # 自動填充預測特徵
+                df_pred['T1A1_Score_num'] = pd.to_numeric(df_pred.get('T1A1_Score', 0), errors='coerce').fillna(0)
+                df_pred['T1A1_Chi_num'] = pd.to_numeric(df_pred.get('T1A1_中文_C_Score', 0), errors='coerce').fillna(0)
+                df_pred['T1A1_Eng_num'] = pd.to_numeric(df_pred.get('T1A1_英文_E_Score', 0), errors='coerce').fillna(0)
+                df_pred['T1A1_Math_num'] = pd.to_numeric(df_pred.get('T1A1_數必_C_Score', 0), errors='coerce').fillna(0)
                 
-            with tab_s2:
-                df_s5_a = df_s5[df_s5['開學培訓類別'].str.contains("穩健組")]
-                st.dataframe(df_s5_a[disp_s5_cols].rename(columns=rename_dict if 'rename_dict' in locals() else rename_s5), use_container_width=True, hide_index=True)
+                df_pred['T1A3_Score_num'] = pd.to_numeric(df_pred.get('T1A3_Score', df_pred['T1A1_Score_num']), errors='coerce').fillna(0)
+                df_pred['T1A3_Chi_num'] = pd.to_numeric(df_pred.get('T1A3_中文_C_Score', df_pred['T1A1_Chi_num']), errors='coerce').fillna(0)
+                df_pred['T1A3_Eng_num'] = pd.to_numeric(df_pred.get('T1A3_英文_E_Score', df_pred['T1A1_Eng_num']), errors='coerce').fillna(0)
+                df_pred['T1A3_Math_num'] = pd.to_numeric(df_pred.get('T1A3_數必_C_Score', df_pred['T1A1_Math_num']), errors='coerce').fillna(0)
+                df_pred['Score_Diff'] = df_pred['T1A3_Score_num'] - df_pred['T1A1_Score_num']
                 
-            with tab_s3:
-                df_s5_c = df_s5[df_s5['開學培訓類別'].str.contains("保底")]
-                st.dataframe(df_s5_c[disp_s5_cols].rename(columns=rename_s5), use_container_width=True, hide_index=True)
-
+                probs = clf.predict_proba(df_pred[features])[:, 1]
+                df_pred['AI預測升大學概率 (%)'] = (probs * 100).round(1)
+                
+                def level_tag(p):
+                    if p >= 70: return "🎓 高概率升學 (≥70%)"
+                    elif p >= 30: return "🎯 邊緣衝刺 (30-69%)"
+                    else: return "🛟 保底急救 (<30%)"
+                    
+                df_pred['升學概率分組'] = df_pred['AI預測升大學概率 (%)'].apply(level_tag)
+                
+                st.dataframe(df_pred[['*Class', '*Class Number', '*Student Name', 'AI預測升大學概率 (%)', '升學概率分組']], use_container_width=True, hide_index=True)
+                
         except Exception as e:
-            st.error(f"檔案讀取錯誤: {e}")
+            st.error(f"建模過程發生錯誤: {e}")
     else:
-        st.info("💡 請上傳中五 T2A3 年終成績 Excel 檔以產生 9-11 月開學培訓計畫。")
+        st.info("💡 請上傳本屆中六的 3 份檔案（T1A1 測驗、T1A3 模擬試、DSE 成績）以自動訓練數據模型。")
