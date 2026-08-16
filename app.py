@@ -74,11 +74,44 @@ def extract_robust_scores(df):
     df_out['CS_Val'] = cs_series if cs_series is not None else 50
     return df_out
 
+# 通用過往畢業生數據處理函數 (支援不同學期/學年格式)
+def process_training_pair(f_sch, f_dse):
+    d_sch = pd.read_excel(f_sch)
+    d_dse = pd.read_excel(f_dse)
+    
+    # 清理校內檔註冊編號
+    sch_reg_cols = [c for c in d_sch.columns if any(k in str(c) for k in ['Reg', '註冊編號', '學號'])]
+    sch_reg = sch_reg_cols[0] if sch_reg_cols else '*Reg. No.'
+    d_sch['Reg_Clean'] = d_sch[sch_reg].astype(str).str.replace('#', '').str.strip()
+    
+    # 清理 DSE 檔註冊編號
+    reg_cols = [c for c in d_dse.columns if any(k in str(c) for k in ['Registration', 'Reg', '註冊編號', '學號'])]
+    dse_reg_col = reg_cols[0] if reg_cols else d_dse.columns[0]
+    d_dse['Registration No.'] = d_dse[dse_reg_col].astype(str).str.strip()
+    
+    m_ai = pd.merge(d_sch, d_dse, left_on='Reg_Clean', right_on='Registration No.')
+    m_ai = extract_robust_scores(m_ai)
+    
+    # 動態辨識 DSE 中英數欄位
+    chi_dse_cols = [c for c in d_dse.columns if any(k in str(c) for k in ['A010', 'Chinese', '中文'])]
+    eng_dse_cols = [c for c in d_dse.columns if any(k in str(c) for k in ['A020', 'English', '英文'])]
+    math_dse_cols = [c for c in d_dse.columns if any(k in str(c) for k in ['A030', 'Math', '數學']) and not any(k in str(c) for k in ['M1', 'M2', '數一', '數二'])]
+    
+    chi_col = chi_dse_cols[0] if chi_dse_cols else 'A010 Chinese'
+    eng_col = eng_dse_cols[0] if eng_dse_cols else 'A020 English'
+    math_col = math_dse_cols[0] if math_dse_cols else 'A030 Math Compulsory'
+    
+    m_ai['DSE_Chi'] = m_ai[chi_col].apply(grade_to_level)
+    m_ai['DSE_Eng'] = m_ai[eng_col].apply(grade_to_level)
+    m_ai['DSE_Math'] = m_ai[math_col].apply(grade_to_level)
+    m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
+    
+    feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
+    return m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332']]
+
 # 優先提取決策樹「最頂層主幹（根節點）」切分門檻
 def extract_ai_thresholds(clf, df_train, feats):
     thresholds = {}
-    
-    # 由上至下遍歷決策樹，抓取每個科目第一個出現（主幹）的切分點
     for i in range(clf.tree_.node_count):
         f_idx = clf.tree_.feature[i]
         if f_idx >= 0:
@@ -126,7 +159,7 @@ student_info_df = load_student_info()
 st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "🤖 跨學年 AI 數據建模與門檻提煉",
+    "🤖 跨學年 AI 數據建模與門檻自動提煉",
     "🎓 2526HKDSE 公開試成效與中六 T2A3/模擬試對照", 
     "🔮 校內成績升學預測與四類名單"
 ])
@@ -142,7 +175,7 @@ if 'u_cs_val' not in st.session_state: st.session_state['u_cs_val'] = 40.0
 st.sidebar.header("⚙️ 大學門檻 (332A22) 校內分數設定")
 
 if st.session_state.get('ai_updated_flag', False):
-    st.sidebar.success("🤖 已根據 AI 訓練結果自動更新大學主幹門檻！")
+    st.sidebar.success("🤖 已根據多套 AI 訓練數據自動更新大學主幹門檻！")
 
 u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", value=st.session_state['u_score_val'])
 u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", value=st.session_state['u_chi_val'])
@@ -159,30 +192,40 @@ sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=4
 # ==================== 分頁一（最左）：AI 機器學習建模 ====================
 with main_tab1:
     st.subheader("🤖 跨學年 AI 數據建模與門檻自動提煉")
-    st.write("利用過往畢業生的「校內期末成績」與「2526HKDSE 實際成績」自動訓練 AI 模型，提煉數據驅動的精準門檻，並自動同步至左側邊欄設定。")
+    st.write("支援同時上傳多個學年（如 2526 屆及 2425 屆）的畢業生數據，合併擴充歷史樣本，顯著提升校內門檻提煉的代表性與精準度。")
     
-    col_a, col_b = st.columns(2)
-    with col_a: f_tr_school = st.file_uploader("1. 上傳【過往畢業生】校內期末/模擬試成績 (Excel)", type=["xls", "xlsx"], key="tr_s")
-    with col_b: f_tr_dse = st.file_uploader("2. 上傳【過往畢業生】2526HKDSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="tr_d")
+    st.markdown("##### 📁 第一套歷史數據 (例如 2526 屆畢業生)")
+    col_a1, col_b1 = st.columns(2)
+    with col_a1: f_tr_school_1 = st.file_uploader("1A. 上傳【2526 屆】校內模擬試/期末成績 (Excel)", type=["xls", "xlsx"], key="tr_s_1")
+    with col_b1: f_tr_dse_1 = st.file_uploader("1B. 上傳【2526 屆】2526HKDSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="tr_d_1")
     
-    if f_tr_school and f_tr_dse and HAS_SKLEARN:
+    st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 選填，增加樣本量與精準度)")
+    col_a2, col_b2 = st.columns(2)
+    with col_a2: f_tr_school_2 = st.file_uploader("2A. (選填) 上傳【2425 屆】校內模擬試/期末成績 (Excel)", type=["xls", "xlsx"], key="tr_s_2")
+    with col_b2: f_tr_dse_2 = st.file_uploader("2B. (選填) 上傳【2425 屆】2425HKDSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="tr_d_2")
+    
+    train_dfs = []
+    
+    # 處理第一套
+    if f_tr_school_1 and f_tr_dse_1:
         try:
-            d_sch = pd.read_excel(f_tr_school)
-            d_dse = pd.read_excel(f_tr_dse)
+            df1 = process_training_pair(f_tr_school_1, f_tr_dse_1)
+            train_dfs.append(df1)
+        except Exception as e:
+            st.error(f"第一套數據處理失敗: {e}")
             
-            d_sch['Reg_Clean'] = d_sch['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
-            d_dse['Registration No.'] = d_dse['Registration No.'].astype(str).str.strip()
-            
-            m_ai = pd.merge(d_sch, d_dse, left_on='Reg_Clean', right_on='Registration No.')
-            m_ai = extract_robust_scores(m_ai)
-            
-            m_ai['DSE_Chi'] = m_ai['A010 Chinese'].apply(grade_to_level)
-            m_ai['DSE_Eng'] = m_ai['A020 English'].apply(grade_to_level)
-            m_ai['DSE_Math'] = m_ai['A030 Math Compulsory'].apply(grade_to_level)
-            m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
-            
+    # 處理第二套
+    if f_tr_school_2 and f_tr_dse_2:
+        try:
+            df2 = process_training_pair(f_tr_school_2, f_tr_dse_2)
+            train_dfs.append(df2)
+        except Exception as e:
+            st.error(f"第二套數據處理失敗: {e}")
+
+    if train_dfs and HAS_SKLEARN:
+        try:
+            df_train = pd.concat(train_dfs, ignore_index=True)
             feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
-            df_train = m_ai.dropna(subset=feats + ['Target_332'])
             
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
@@ -208,7 +251,7 @@ with main_tab1:
                 st.session_state['ai_updated_flag'] = True
                 st.rerun()
 
-            st.success(f"🎉 AI 模型訓練成功！已自動將主幹最優切分線同步至左側大學門檻設定。（歷史樣本數：{len(df_train)} 人）")
+            st.success(f"🎉 AI 模型訓練成功！已合併 {len(train_dfs)} 套歷史數據（總訓練樣本數：{len(df_train)} 人），並將主幹最優切分線同步至左側大學門檻設定。")
             
             col_tree1, col_tree2 = st.columns([1, 1])
             with col_tree1:
