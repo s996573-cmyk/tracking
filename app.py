@@ -314,7 +314,7 @@ def extract_robust_scores(df):
     return df_out
 
 # 通用過往畢業生數據對照與清洗處理
-def process_training_pair(f_sch, f_dse):
+def process_training_pair(f_sch, f_dse, dataset_label="2526 屆"):
     d_sch = safe_read_file(f_sch)
     d_dse = safe_read_file(f_dse)
     
@@ -328,7 +328,7 @@ def process_training_pair(f_sch, f_dse):
     
     m_ai = pd.merge(d_sch, d_dse, on='Reg_Clean')
     if len(m_ai) == 0:
-        return pd.DataFrame(), pd.DataFrame(), f"⚠️ 對照失敗：無法透過校內【{sch_reg}】與 DSE【{dse_reg}】匹配學生身份，請確認兩檔學號是否相符。"
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), f"⚠️ 對照失敗：無法透過校內【{sch_reg}】與 DSE【{dse_reg}】匹配學生身份，請確認兩檔學號是否相符。"
         
     m_ai = extract_robust_scores(m_ai)
     
@@ -337,21 +337,70 @@ def process_training_pair(f_sch, f_dse):
     math_col = find_best_dse_subject_col(d_dse.columns, ['A030', 'MATH', '數學'], ['M1', 'M2', '數一', '數二', 'EXTENDED', '單元'])
     
     if not (chi_col and eng_col and math_col):
-        return pd.DataFrame(), pd.DataFrame(), "⚠️ DSE 核心科目欄位辨識失敗：DSE 表格需包含中文、英文及數學必修部分成績。"
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "⚠️ DSE 核心科目欄位辨識失敗：DSE 表格需包含中文、英文及數學必修部分成績。"
         
-    m_ai['DSE_Chi'] = m_ai[chi_col].apply(parse_dse_grade)
-    m_ai['DSE_Eng'] = m_ai[eng_col].apply(parse_dse_grade)
-    m_ai['DSE_Math'] = m_ai[math_col].apply(parse_dse_grade)
+    m_ai['DSE_Chi_Lvl'] = m_ai[chi_col].apply(parse_dse_grade)
+    m_ai['DSE_Eng_Lvl'] = m_ai[eng_col].apply(parse_dse_grade)
+    m_ai['DSE_Math_Lvl'] = m_ai[math_col].apply(parse_dse_grade)
     
-    m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
+    m_ai['DSE_Chi_Raw'] = m_ai[chi_col]
+    m_ai['DSE_Eng_Raw'] = m_ai[eng_col]
+    m_ai['DSE_Math_Raw'] = m_ai[math_col]
+    
+    m_ai['Target_332'] = ((m_ai['DSE_Chi_Lvl'] >= 3) & (m_ai['DSE_Eng_Lvl'] >= 3) & (m_ai['DSE_Math_Lvl'] >= 2)).astype(int)
+    m_ai['Target_222'] = ((m_ai['DSE_Chi_Lvl'] >= 2) & (m_ai['DSE_Eng_Lvl'] >= 2) & (m_ai['DSE_Math_Lvl'] >= 2)).astype(int)
+    
+    def get_tier(row):
+        if row['Target_332'] == 1:
+            return "🎓 大學收生門檻 (332)"
+        elif row['Target_222'] == 1:
+            return "🏫 大專收生門檻 (222)"
+        else:
+            return "未達 222 門檻"
+
+    m_ai['達標類別'] = m_ai.apply(get_tier, axis=1)
     
     feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
-    clean_df = m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332', 'DSE_Chi', 'DSE_Eng', 'DSE_Math']]
+    clean_df = m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332', 'Target_222', 'DSE_Chi_Lvl', 'DSE_Eng_Lvl', 'DSE_Math_Lvl']]
     
-    # 計算全學科相關係數表
     df_all_corr = compute_all_subjects_correlation(d_sch, d_dse)
     
-    return clean_df, df_all_corr, None
+    # 提取達大學或大專收生門檻之學生成績對照表
+    comp_df = m_ai[m_ai['Target_222'] == 1].copy()
+    comp_df['屆別'] = dataset_label
+    
+    cols_mapping = {
+        '屆別': '屆別',
+        '*Class': '班別', 'Class': '班別',
+        '*Class Number': '班號', 'Class No.': '班號',
+        '中文姓名': '中文姓名',
+        'Name': '英文姓名', '*Student Name': '英文姓名',
+        'Avg_Score': '校內總平均分',
+        'Chi_Score': '校內中文分數',
+        'Eng_Score': '校內英文分數',
+        'Math_Score': '校內數學分數',
+        'CS_Val': '校內公社科分數',
+        'DSE_Chi_Raw': 'DSE 中文等級',
+        'DSE_Eng_Raw': 'DSE 英文等級',
+        'DSE_Math_Raw': 'DSE 數學等級',
+        '達標類別': '達標類別'
+    }
+    
+    display_cols = []
+    for c in ['屆別', '班別', '班號', '中文姓名', '英文姓名', '校內總平均分', '校內中文分數', '校內英文分數', '校內數學分數', '校內公社科分數', 'DSE 中文等級', 'DSE 英文等級', 'DSE 數學等級', '達標類別']:
+        found = None
+        for orig, mapped in cols_mapping.items():
+            if mapped == c and orig in comp_df.columns:
+                found = orig
+                break
+        if found:
+            comp_df[c] = comp_df[found]
+            if c not in display_cols:
+                display_cols.append(c)
+                
+    res_comp_df = comp_df[display_cols]
+    
+    return clean_df, df_all_corr, res_comp_df, None
 
 # 優先提取決策樹「最頂層主幹（根節點）」切分門檻
 def extract_ai_thresholds(clf, df_train, feats):
@@ -402,9 +451,8 @@ student_info_df = load_student_info()
 
 st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 
-main_tab1, main_tab2, main_tab3 = st.tabs([
+main_tab1, main_tab2 = st.tabs([
     "🤖 跨學年 AI 數據建模與門檻自動提煉",
-    "🎓 2526HKDSE 公開試成效與中六 T2A3/模擬試對照", 
     "🔮 校內成績升學預測與四類名單"
 ])
 
@@ -433,7 +481,7 @@ sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40
 sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0)
 sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0)
 
-# ==================== 分頁一（最左）：AI 機器學習建模 ====================
+# ==================== 分頁一：AI 機器學習建模與對照總覽 ====================
 with main_tab1:
     st.subheader("🤖 跨學年 AI 數據建模與門檻自動提煉")
     st.info("系統會優先自動偵測專案目錄中的數據檔案（如 `2526_T1A3_s6.xlsx`, `2526hkdse.xlsx`, `2425_T1A3_s6.xlsx`, `2425hkdse.xlsx`）。若未找到，亦可透過下方按鈕手動上載。")
@@ -453,17 +501,19 @@ with main_tab1:
         else: st.caption("⚠️ 未找到 2526HKDSE 預設檔，請手動上載。")
 
     train_dfs = []
+    corr_dfs = []
+    comp_dfs = []
     
     # 處理第一套
     if f_tr_school_1 and f_tr_dse_1:
-        df1, corr_df1, err1 = process_training_pair(f_tr_school_1, f_tr_dse_1)
+        df1, corr_df1, comp1, err1 = process_training_pair(f_tr_school_1, f_tr_dse_1, "2526 屆")
         if err1:
             st.error(f"第一套數據：{err1}")
-        elif not df1.empty:
-            train_dfs.append(df1)
-            with st.expander("📈 檢視【第一套數據 (2526 屆)】全學科試卷關聯度與效度分析", expanded=True):
-                st.dataframe(corr_df1, use_container_width=True, hide_index=True)
-            
+        else:
+            if not df1.empty: train_dfs.append(df1)
+            if corr_df1 is not None and not corr_df1.empty: corr_dfs.append(("2526 屆", corr_df1))
+            if comp1 is not None and not comp1.empty: comp_dfs.append(comp1)
+
     st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 增加樣本量與精準度)")
     col_a2, col_b2 = st.columns(2)
     with col_a2: 
@@ -480,13 +530,13 @@ with main_tab1:
 
     # 處理第二套
     if f_tr_school_2 and f_tr_dse_2:
-        df2, corr_df2, err2 = process_training_pair(f_tr_school_2, f_tr_dse_2)
+        df2, corr_df2, comp2, err2 = process_training_pair(f_tr_school_2, f_tr_dse_2, "2425 屆")
         if err2:
             st.error(f"第二套數據：{err2}")
-        elif not df2.empty:
-            train_dfs.append(df2)
-            with st.expander("📈 檢視【第二套數據 (2425 屆)】全學科試卷關聯度與效度分析", expanded=True):
-                st.dataframe(corr_df2, use_container_width=True, hide_index=True)
+        else:
+            if not df2.empty: train_dfs.append(df2)
+            if corr_df2 is not None and not corr_df2.empty: corr_dfs.append(("2425 屆", corr_df2))
+            if comp2 is not None and not comp2.empty: comp_dfs.append(comp2)
 
     if train_dfs and HAS_SKLEARN:
         try:
@@ -496,7 +546,7 @@ with main_tab1:
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
             
-            # 提煉 AI 最佳切分門檻 (優先取主幹)
+            # 提煉 AI 最佳切分門檻
             ai_thresh = extract_ai_thresholds(clf, df_train, feats)
             
             mapping = {
@@ -532,85 +582,70 @@ with main_tab1:
 
         except Exception as e: st.error(f"建模失敗: {e}")
 
-# ==================== 分頁二：2526HKDSE 與中六 T2A3 分數對照 ====================
+    # ===== 新增：達大學 (332) 或大專 (222) 門檻之『公開試 vs 校內成績』對照表與平均分統計 =====
+    if comp_dfs:
+        st.divider()
+        st.subheader("📊 達大學 (332) 或大專 (222) 收生門檻之『公開試成績 vs 校內成績』對照表與平均分總覽")
+        
+        df_all_comp = pd.concat(comp_dfs, ignore_index=True)
+        
+        # 統計指標計算
+        u_group = df_all_comp[df_all_comp['達標類別'].str.contains("332")]
+        sub_group = df_all_comp[df_all_comp['達標類別'].str.contains("222")]
+        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("🎓 達大學門檻 (332) 總人數", f"{len(u_group)} 人")
+        with c2: st.metric("🎓 達大學門檻學生【校內總平均分】", f"{u_group['校內總平均分'].mean():.1f} 分" if not u_group.empty else "N/A")
+        with c3: st.metric("🏫 達大專門檻 (222) 總人數", f"{len(sub_group)} 人")
+        with c4: st.metric("🏫 達大專門檻學生【校內總平均分】", f"{sub_group['校內總平均分'].mean():.1f} 分" if not sub_group.empty else "N/A")
+
+        # 平均分彙整表
+        avg_rows = []
+        if not u_group.empty:
+            avg_rows.append({
+                '門檻類別': '🎓 大學收生門檻 (332A22)',
+                '人數': len(u_group),
+                '校內總平均分': round(u_group['校內總平均分'].mean(), 1) if '校內總平均分' in u_group else np.nan,
+                '校內中文均分': round(u_group['校內中文分數'].mean(), 1) if '校內中文分數' in u_group else np.nan,
+                '校內英文均分': round(u_group['校內英文分數'].mean(), 1) if '校內英文分數' in u_group else np.nan,
+                '校內數學均分': round(u_group['校內數學分數'].mean(), 1) if '校內數學分數' in u_group else np.nan,
+                '校內公社科均分': round(u_group['校內公社科分數'].mean(), 1) if '校內公社科分數' in u_group else np.nan
+            })
+        if not sub_group.empty:
+            avg_rows.append({
+                '門檻類別': '🏫 大專收生門檻 (222A22)',
+                '人數': len(sub_group),
+                '校內總平均分': round(sub_group['校內總平均分'].mean(), 1) if '校內總平均分' in sub_group else np.nan,
+                '校內中文均分': round(sub_group['校內中文分數'].mean(), 1) if '校內中文分數' in sub_group else np.nan,
+                '校內英文均分': round(sub_group['校內英文分數'].mean(), 1) if '校內英文分數' in sub_group else np.nan,
+                '校內數學均分': round(sub_group['校內數學分數'].mean(), 1) if '校內數學分數' in sub_group else np.nan,
+                '校內公社科均分': round(sub_group['校內公社科分數'].mean(), 1) if '校內公社科分數' in sub_group else np.nan
+            })
+            
+        if avg_rows:
+            st.markdown("##### 📌 達標學生校內各科平均分統計 (Group Mean Summary)")
+            st.dataframe(pd.DataFrame(avg_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("##### 📋 達標學生『公開試等級 vs 校內成績』明細表")
+        filter_tier = st.radio("篩選達標類別：", ["全部達標學生", "🎓 僅大學門檻 (332)", "🏫 僅大專門檻 (222)"], horizontal=True)
+        
+        df_disp_filtered = df_all_comp.copy()
+        if filter_tier == "🎓 僅大學門檻 (332)":
+            df_disp_filtered = df_disp_filtered[df_disp_filtered['達標類別'].str.contains("332")]
+        elif filter_tier == "🏫 僅大專門檻 (222)":
+            df_disp_filtered = df_disp_filtered[df_disp_filtered['達標類別'].str.contains("222")]
+            
+        st.dataframe(df_disp_filtered, use_container_width=True, hide_index=True)
+
+    # 展開檢視全學科關聯度分析
+    if corr_dfs:
+        with st.expander("📈 檢視全學科試卷關聯度與效度分析 (All-Subject Correlation Analysis)", expanded=False):
+            for label, c_df in corr_dfs:
+                st.markdown(f"**【{label}】全學科關聯分析：**")
+                st.dataframe(c_df, use_container_width=True, hide_index=True)
+
+# ==================== 分頁二：校內成績預測與四類名單 ====================
 with main_tab2:
-    st.subheader("🎓 2526HKDSE 公開試實際表現與 332A22 / 222A22 門檻對照（含中六 T2A3 對照）")
-    col_d1, col_d2 = st.columns(2)
-    with col_d1: 
-        f_dse_up = st.file_uploader("1. 上傳/替換 2526hkdse 成績表", type=["xls", "xlsx", "csv"], key="dse_main")
-        f_dse, msg_dse_tab2 = resolve_file_source(f_dse_up, ['2526hkdse.xlsx', '2526hkdse.csv'])
-        if f_dse: st.caption(msg_dse_tab2)
-
-    with col_d2: 
-        f_s6_t2a3_up = st.file_uploader("2. (選填) 上傳/替換中六 T2A3 / 模擬試成績表", type=["xls", "xlsx", "csv"], key="s6_t2a3_dse")
-        f_s6_t2a3, msg_s6_tab2 = resolve_file_source(f_s6_t2a3_up, ['2526_T1A3_s6.xlsx', '2526_T1A3_s6.csv'])
-        if f_s6_t2a3: st.caption(msg_s6_tab2)
-    
-    if f_dse:
-        try:
-            df_dse = safe_read_file(f_dse)
-            dse_reg_cols = [c for c in df_dse.columns if 'Registration No' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c)]
-            dse_reg = dse_reg_cols[0] if dse_reg_cols else df_dse.columns[0]
-            df_dse['Registration_Clean'] = df_dse[dse_reg].apply(clean_id)
-            
-            if student_info_df is not None:
-                df_dse = pd.merge(df_dse, student_info_df, left_on='Registration_Clean', right_on='註冊編號_clean', how='left')
-                
-            c_col = find_best_dse_subject_col(df_dse.columns, ['A010', 'CHINESE', '中文'])
-            e_col = find_best_dse_subject_col(df_dse.columns, ['A020', 'ENGLISH', '英文'])
-            m_col = find_best_dse_subject_col(df_dse.columns, ['A030', 'MATH', '數學'], ['M1', 'M2', '數一', '數二', 'EXTENDED', '單元'])
-
-            df_dse['Chi_Lvl'] = df_dse[c_col].apply(parse_dse_grade)
-            df_dse['Eng_Lvl'] = df_dse[e_col].apply(parse_dse_grade)
-            df_dse['Math_Lvl'] = df_dse[m_col].apply(parse_dse_grade)
-            
-            df_dse['Met_332A22'] = (df_dse['Chi_Lvl'] >= 3) & (df_dse['Eng_Lvl'] >= 3) & (df_dse['Math_Lvl'] >= 2)
-            df_dse['Met_222A22'] = (df_dse['Chi_Lvl'] >= 2) & (df_dse['Eng_Lvl'] >= 2) & (df_dse['Math_Lvl'] >= 2)
-            
-            if f_s6_t2a3:
-                df_s6 = safe_read_file(f_s6_t2a3)
-                sch_reg_cols = [c for c in df_s6.columns if '*Reg. No.' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c)]
-                sch_reg = sch_reg_cols[0] if sch_reg_cols else df_s6.columns[0]
-                df_s6['Reg_Clean'] = df_s6[sch_reg].apply(clean_id)
-                df_s6 = extract_robust_scores(df_s6)
-                
-                df_s6_sub = df_s6[['Reg_Clean', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']].rename(columns={
-                    'Avg_Score': 'S6_T2A3_總平均分',
-                    'Chi_Score': 'S6_T2A3_中文',
-                    'Eng_Score': 'S6_T2A3_英文',
-                    'Math_Score': 'S6_T2A3_數學'
-                })
-                
-                df_dse = pd.merge(df_dse, df_s6_sub, left_on='Registration_Clean', right_on='Reg_Clean', how='left')
-                st.success("✅ 成功對照並融合「中六 T2A3 校內分數」與「DSE 實際成績」！")
-
-            u_count = df_dse['Met_332A22'].sum()
-            sub_count = df_dse['Met_222A22'].sum() - u_count
-            base_count = len(df_dse) - df_dse['Met_222A22'].sum()
-            
-            c1, c2, c3 = st.columns(3)
-            with c1: st.metric("🎓 達大學門檻 (332A22)", f"{u_count} 人")
-            with c2: st.metric("🏫 達大專門檻 (222A22)", f"{sub_count} 人")
-            with c3: st.metric("🛟 需保底支援 (未達 222)", f"{base_count} 人")
-            
-            st.divider()
-            
-            disp_dse = []
-            if 'Class' in df_dse.columns: disp_dse.append('Class')
-            if 'Class No.' in df_dse.columns: disp_dse.append('Class No.')
-            if '中文姓名' in df_dse.columns: disp_dse.append('中文姓名')
-            if 'Name' in df_dse.columns: disp_dse.append('Name')
-            
-            if f_s6_t2a3:
-                disp_dse.extend(['S6_T2A3_總平均分', 'S6_T2A3_中文', 'S6_T2A3_英文', 'S6_T2A3_數學'])
-                
-            disp_dse.extend([c_col, e_col, m_col, 'Met_332A22', 'Met_222A22'])
-            
-            st.dataframe(df_dse[disp_dse], use_container_width=True, hide_index=True)
-        except Exception as e: st.error(f"DSE 檔案讀取或對照失敗: {e}")
-
-# ==================== 分頁三：校內成績預測與四類名單 ====================
-with main_tab3:
     st.subheader("🔮 校內成績預測：產生「大學」、「特別支援（差一科）」、「大專」及「保底」名單")
     f_eval_up = st.file_uploader("上傳/替換校內成績表 (Excel / CSV)", type=["xls", "xlsx", "csv"], key="eval_up")
     f_eval, msg_eval_tab3 = resolve_file_source(f_eval_up, ['2526_T1A3_s6.xlsx', '2526_T1A3_s6.csv'])
@@ -646,7 +681,7 @@ with main_tab3:
                 try: return float(val_str) >= u_cs_thresh
                 except: return False
 
-            # 將公社科分數格式化為數值（若為數值則保留，非數值顯示原標籤/分數）
+            # 將公社科分數格式化為數值
             def format_cs_score(cs_val):
                 if pd.isna(cs_val): return np.nan
                 try:
@@ -712,7 +747,6 @@ with main_tab3:
             if '中文姓名' in df_ev.columns: disp_ev.append('中文姓名')
             if '*Student Name' in df_ev.columns: disp_ev.append('*Student Name')
             
-            # 依序放入核心科（含公民與社會發展科分數）與所有選修科分數
             disp_ev.extend(['總平均分', '中文科', '英文科', '數學必修', '公民與社會發展科'])
             disp_ev.extend(elective_cols_added)
             disp_ev.extend(['升學類別', '診斷與提示'])
