@@ -678,7 +678,6 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
         "DSE_Chi_Raw": "DSE 中文等級",
         "DSE_Eng_Raw": "DSE 英文等級",
         "DSE_Math_Raw": "DSE 數學等級",
-        # 註：'達標類別' 已移除出此字典，確保其不在基礎欄位階段被提前加入
     }
 
     display_cols = []
@@ -720,7 +719,7 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
         if dse_col_name in comp_df.columns:
             display_cols.append(dse_col_name)
 
-    # 關鍵修正：確保「達標類別」最後加入，穩固排在表格最後一欄
+    # 確保單獨數據集的「達標類別」也在末尾
     if "達標類別" in comp_df.columns:
         if "達標類別" in display_cols:
             display_cols.remove("達標類別")
@@ -983,6 +982,13 @@ with main_tab1:
 
         df_all_comp = pd.concat(comp_dfs, ignore_index=True)
 
+        # 核心修正：合併多套數據後，強制將「達標類別」移至所有動態欄位的最末端
+        if "達標類別" in df_all_comp.columns:
+            reordered_cols = [
+                c for c in df_all_comp.columns if c != "達標類別"
+            ] + ["達標類別"]
+            df_all_comp = df_all_comp[reordered_cols]
+
         # 統計指標計算
         u_group = df_all_comp[df_all_comp["達標類別"].str.contains("332")]
         sub_group = df_all_comp[
@@ -1097,6 +1103,13 @@ with main_tab1:
             df_disp_filtered = df_disp_filtered[
                 df_disp_filtered["學年"].astype(str) == filter_year
             ]
+
+        # 雙重保險：顯示前再次確認「達標類別」位在最末列
+        if "達標類別" in df_disp_filtered.columns:
+            disp_cols = [
+                c for c in df_disp_filtered.columns if c != "達標類別"
+            ] + ["達標類別"]
+            df_disp_filtered = df_disp_filtered[disp_cols]
 
         st.dataframe(
             df_disp_filtered, use_container_width=True, hide_index=True
