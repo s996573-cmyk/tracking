@@ -606,7 +606,7 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
             ),
         )
 
-    # 🌟 自動補全「中文姓名」（若 student_info.xlsx 存在且原檔案缺乏）
+    # 自動補全「中文姓名」（若 student_info.xlsx 存在且原檔案缺乏）
     if student_info_df is not None:
         has_chi_col = any(
             k in m_ai.columns
@@ -721,7 +721,7 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
     }
 
     display_cols = []
-    # 基礎欄位定義 (含中文姓名)
+    # 核心調整：主科採「DSE 公開試等級 -> 校內分數」成對順序呈現
     base_order = [
         "學年",
         "班別",
@@ -729,13 +729,13 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
         "中文姓名",
         "英文姓名",
         "校內總平均分",
+        "DSE 中文等級",
         "校內中文分數",
+        "DSE 英文等級",
         "校內英文分數",
+        "DSE 數學等級",
         "校內數學分數",
         "校內公社科分數",
-        "DSE 中文等級",
-        "DSE 英文等級",
-        "DSE 數學等級",
     ]
 
     for c in base_order:
@@ -749,15 +749,15 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
             if c not in display_cols:
                 display_cols.append(c)
 
-    # 動態添加已出現的選修科對照欄位（校內分數與 DSE 等級）
+    # 動態添加選修科對照欄位（同樣採「DSE 公開試等級 -> 校內分數」順序呈現）
     for sub in SUBJECT_MAP[3:]:
         sub_name = sub["name"]
         sch_col_name = f"校內{sub_name}"
         dse_col_name = f"DSE {sub_name}"
-        if sch_col_name in comp_df.columns:
-            display_cols.append(sch_col_name)
         if dse_col_name in comp_df.columns:
             display_cols.append(dse_col_name)
+        if sch_col_name in comp_df.columns:
+            display_cols.append(sch_col_name)
 
     # 確保「達標類別」最後加入，穩固排在表格最後一欄
     if "達標類別" in comp_df.columns:
