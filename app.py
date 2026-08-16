@@ -78,13 +78,12 @@ def extract_robust_scores(df):
 def extract_ai_thresholds(clf, df_train, feats):
     thresholds = {}
     
-    # 由上至下遍歷決策樹，只抓取每個科目「第一個出現（權重最高）」的主幹切分點
+    # 由上至下遍歷決策樹，抓取每個科目第一個出現（主幹）的切分點
     for i in range(clf.tree_.node_count):
         f_idx = clf.tree_.feature[i]
         if f_idx >= 0:
             f_name = feats[f_idx]
             t_val = round(float(clf.tree_.threshold[i]), 2)
-            # 若該科目尚未記錄，存入第一個（即最高層）切分點
             if f_name not in thresholds:
                 thresholds[f_name] = t_val
                 
@@ -127,7 +126,7 @@ student_info_df = load_student_info()
 st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 
 main_tab1, main_tab2, main_tab3 = st.tabs([
-    "🤖 跨學年 AI 數據建模與預測",
+    "🤖 跨學年 AI 數據建模與門檻提煉",
     "🎓 2526HKDSE 公開試成效與中六 T2A3/模擬試對照", 
     "🔮 校內成績升學預測與四類名單"
 ])
@@ -159,7 +158,7 @@ sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=4
 
 # ==================== 分頁一（最左）：AI 機器學習建模 ====================
 with main_tab1:
-    st.subheader("🤖 跨學年 AI 數據建模與升學概率預測")
+    st.subheader("🤖 跨學年 AI 數據建模與門檻自動提煉")
     st.write("利用過往畢業生的「校內期末成績」與「2526HKDSE 實際成績」自動訓練 AI 模型，提煉數據驅動的精準門檻，並自動同步至左側邊欄設定。")
     
     col_a, col_b = st.columns(2)
@@ -213,7 +212,7 @@ with main_tab1:
             
             col_tree1, col_tree2 = st.columns([1, 1])
             with col_tree1:
-                st.markdown("##### 📊 各科目對升大學 (332) 的預測影響權重：")
+                st.markdown("##### 📊 各科目對升大學 (332) 的預測權重：")
                 imp_df = pd.DataFrame({'校內指標': feats, 'AI 預測權重': clf.feature_importances_}).sort_values('AI 預測權重', ascending=False)
                 st.dataframe(imp_df, use_container_width=True, hide_index=True)
                 
@@ -221,36 +220,8 @@ with main_tab1:
                 st.markdown("##### 🌲 AI 自動提煉的數據決策樹規則 (Exact Cutoffs)：")
                 rules = export_text(clf, feature_names=feats)
                 st.code(rules, language="text")
-            
-            st.divider()
-            st.markdown("### 🔮 預測【現屆中六】升學概率")
-            f_next_cohort = st.file_uploader("3. 上傳【現屆中六】校內成績表進行概率預測 (Excel)", type=["xls", "xlsx"], key="next_cohort")
-            
-            if f_next_cohort:
-                df_next = pd.read_excel(f_next_cohort)
-                if student_info_df is not None:
-                    df_next['Reg_Clean'] = df_next['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
-                    df_next = pd.merge(df_next, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
-                
-                df_next = extract_robust_scores(df_next)
-                
-                probs = clf.predict_proba(df_next[feats].fillna(0))[:, 1]
-                df_next['AI 預測入大學概率 (%)'] = (probs * 100).round(1)
-                
-                def level_tag(p):
-                    if p >= 70: return "🎓 高概率升學 (≥70%)"
-                    elif p >= 35: return "🎯 邊緣衝刺 (35-69%)"
-                    else: return "🛟 保底急救 (<35%)"
-                    
-                df_next['AI 評估分組'] = df_next['AI 預測入大學概率 (%)'].apply(level_tag)
-                
-                disp_ai = ['*Class', '*Class Number']
-                if '中文姓名' in df_next.columns: disp_ai.append('中文姓名')
-                disp_ai.extend(['*Student Name', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score', 'AI 預測入大學概率 (%)', 'AI 評估分組'])
-                
-                st.dataframe(df_next[disp_ai].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
 
-        except Exception as e: st.error(f"建模或預測失敗: {e}")
+        except Exception as e: st.error(f"建模失敗: {e}")
 
 # ==================== 分頁二：2526HKDSE 與中六 T2A3 分數對照 ====================
 with main_tab2:
