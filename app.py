@@ -585,16 +585,26 @@ with main_tab3:
                     df_ev[col_name] = s.round(1)
                     elective_cols_added.append(col_name)
 
-            def cs_is_attained(cs_val):
-                if pd.isna(cs_val): return False
+            # 公社科/公民科達標格式化轉換器 (合格顯示 A, 未合格顯示 U)
+            def parse_cs_display(cs_val, thresh=40.0):
+                if pd.isna(cs_val) or str(cs_val).strip() == '':
+                    return 'U'
                 val_str = str(cs_val).strip().upper()
-                if val_str in ['A', 'PASS', 'ATTAINED', '達標', 'D', 'C', 'B', 'E']: return True
-                try: return float(val_str) >= u_cs_thresh
-                except: return False
+                if val_str in ['A', 'PASS', 'ATTAINED', '達標', 'D', 'C', 'B', 'E']:
+                    return 'A'
+                if val_str in ['U', 'UNATTAINED', '不達標', 'FAIL', 'F']:
+                    return 'U'
+                try:
+                    score = float(val_str)
+                    return 'A' if score >= thresh else 'U'
+                except:
+                    return 'U'
+
+            df_ev['公民與社會發展科'] = df_ev['CS_Val'].apply(lambda x: parse_cs_display(x, u_cs_thresh))
 
             def categorize_student(row):
-                s, c, e, m, cs = row['Avg_Score'], row['Chi_Score'], row['Eng_Score'], row['Math_Score'], row['CS_Val']
-                cs_ok = cs_is_attained(cs)
+                s, c, e, m = row['Avg_Score'], row['Chi_Score'], row['Eng_Score'], row['Math_Score']
+                cs_ok = (row['公民與社會發展科'] == 'A')
                 
                 cond_u = [
                     pd.notna(s) and s >= u_score_thresh,
@@ -648,8 +658,8 @@ with main_tab3:
             if '中文姓名' in df_ev.columns: disp_ev.append('中文姓名')
             if '*Student Name' in df_ev.columns: disp_ev.append('*Student Name')
             
-            # 依序放入主科與所有選修科分數
-            disp_ev.extend(['總平均分', '中文科', '英文科', '數學必修'])
+            # 依序放入核心科（含公社科 A/U）與所有選修科分數
+            disp_ev.extend(['總平均分', '中文科', '英文科', '數學必修', '公民與社會發展科'])
             disp_ev.extend(elective_cols_added)
             disp_ev.extend(['升學類別', '診斷與提示'])
             
