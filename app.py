@@ -87,12 +87,6 @@ def extract_ai_thresholds(clf, df_train, feats):
                 
     successful_df = df_train[df_train['Target_332'] == 1]
     
-    mapping = {
-        'Avg_Score': 'u_score_input',
-        'Chi_Score': 'u_chi_input',
-        'Eng_Score': 'u_eng_input',
-        'Math_Score': 'u_math_input'
-    }
     defaults = {
         'Avg_Score': 55.0,
         'Chi_Score': 52.0,
@@ -102,14 +96,13 @@ def extract_ai_thresholds(clf, df_train, feats):
     
     final_thresh = {}
     for f in feats:
-        key = mapping[f]
         if f in thresholds:
-            final_thresh[key] = thresholds[f]
+            final_thresh[f] = thresholds[f]
         elif not successful_df.empty and f in successful_df.columns:
             val = round(float(successful_df[f].quantile(0.10)), 1)
-            final_thresh[key] = val
+            final_thresh[f] = val
         else:
-            final_thresh[key] = defaults[f]
+            final_thresh[f] = defaults[f]
             
     return final_thresh
 
@@ -136,12 +129,12 @@ main_tab1, main_tab2, main_tab3 = st.tabs([
     "🔮 校內成績升學預測與四類名單"
 ])
 
-# 初始化 session state 預設門檻
-if 'u_score_input' not in st.session_state: st.session_state['u_score_input'] = 55.0
-if 'u_chi_input' not in st.session_state: st.session_state['u_chi_input'] = 52.0
-if 'u_eng_input' not in st.session_state: st.session_state['u_eng_input'] = 55.0
-if 'u_math_input' not in st.session_state: st.session_state['u_math_input'] = 40.0
-if 'u_cs_input' not in st.session_state: st.session_state['u_cs_input'] = 40.0
+# 初始化 session state 預設門檻變數
+if 'u_score_val' not in st.session_state: st.session_state['u_score_val'] = 55.0
+if 'u_chi_val' not in st.session_state: st.session_state['u_chi_val'] = 52.0
+if 'u_eng_val' not in st.session_state: st.session_state['u_eng_val'] = 55.0
+if 'u_math_val' not in st.session_state: st.session_state['u_math_val'] = 40.0
+if 'u_cs_val' not in st.session_state: st.session_state['u_cs_val'] = 40.0
 
 # 側邊欄門檻設定
 st.sidebar.header("⚙️ 大學門檻 (332A22) 校內分數設定")
@@ -149,17 +142,17 @@ st.sidebar.header("⚙️ 大學門檻 (332A22) 校內分數設定")
 if st.session_state.get('ai_updated_flag', False):
     st.sidebar.success("🤖 已根據 AI 訓練結果自動更新大學門檻！")
 
-u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", key="u_score_input")
-u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", key="u_chi_input")
-u_eng_thresh = st.sidebar.number_input("大學：英文分數門檻", key="u_eng_input")
-u_math_thresh = st.sidebar.number_input("大學：數學分數門檻", key="u_math_input")
-u_cs_thresh = st.sidebar.number_input("大學：公社科分數門檻", key="u_cs_input")
+u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", value=st.session_state['u_score_val'])
+u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", value=st.session_state['u_chi_val'])
+u_eng_thresh = st.sidebar.number_input("大學：英文分數門檻", value=st.session_state['u_eng_val'])
+u_math_thresh = st.sidebar.number_input("大學：數學分數門檻", value=st.session_state['u_math_val'])
+u_cs_thresh = st.sidebar.number_input("大學：公社科分數門檻", value=st.session_state['u_cs_val'])
 
 st.sidebar.header("⚙️ 大專門檻 (222A22) 校內分數設定")
-sub_score_thresh = st.sidebar.number_input("大專：總平均分門檻", value=40.0, key="sub_score_input")
-sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40.0, key="sub_chi_input")
-sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0, key="sub_eng_input")
-sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0, key="sub_math_input")
+sub_score_thresh = st.sidebar.number_input("大專：總平均分門檻", value=40.0)
+sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40.0)
+sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0)
+sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0)
 
 # ==================== 分頁一（最左）：AI 機器學習建模 ====================
 with main_tab1:
@@ -195,11 +188,18 @@ with main_tab1:
             # 提煉 AI 最佳切分門檻
             ai_thresh = extract_ai_thresholds(clf, df_train, feats)
             
-            # 檢查是否需要更新左側邊欄
+            mapping = {
+                'Avg_Score': 'u_score_val',
+                'Chi_Score': 'u_chi_val',
+                'Eng_Score': 'u_eng_val',
+                'Math_Score': 'u_math_val'
+            }
+            
             need_rerun = False
-            for k, val in ai_thresh.items():
-                if round(st.session_state.get(k, 0.0), 1) != round(val, 1):
-                    st.session_state[k] = val
+            for feat_name, state_key in mapping.items():
+                new_val = ai_thresh.get(feat_name, st.session_state[state_key])
+                if round(st.session_state[state_key], 1) != round(new_val, 1):
+                    st.session_state[state_key] = new_val
                     need_rerun = True
 
             if need_rerun or not st.session_state.get('ai_updated_flag', False):
