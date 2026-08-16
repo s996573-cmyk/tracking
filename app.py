@@ -27,60 +27,55 @@ def grade_to_level(g):
     try: return float(g_str)
     except: return np.nan
 
-# 防崩潰：安全提取 Dataframe 欄位數值 (解決 'int' object has no attribute 'fillna' 錯誤)
-def safe_get_series(df, col_candidates, default_val=0.0):
-    for col in col_candidates:
-        if col in df.columns:
-            return pd.to_numeric(df[col], errors='coerce').fillna(default_val)
-    for candidate in col_candidates:
-        matches = [c for c in df.columns if candidate in str(c)]
-        if matches:
-            return pd.to_numeric(df[matches[0]], errors='coerce').fillna(default_val)
-    return pd.Series(default_val, index=df.index)
-
 # 健壯的核心科目成績自動提取函數
 def extract_robust_scores(df):
+    df_out = df.copy()
+    
     # 1. 提取總平均分
-    tot_cols = [c for c in ['T2A3_Score', 'T1A3_Score', 'T2A1_Score', 'T1A1_Score', 'Score'] if c in df.columns]
+    tot_cols = [c for c in ['T2A3_Score', 'T1A3_Score', 'T2A1_Score', 'T1A1_Score', 'Score'] if c in df_out.columns]
     if not tot_cols:
-        tot_cols = [c for c in df.columns if c.endswith('_Score') and not any(sub in c for sub in ['生物', '化學', '中文', '英文', '數學', '數必', '公民', '企財', '經濟', '地理', '歷史', '中史', '物理', '資通', '視憑', '倫教', '體育', '學培課', '退修課'])]
+        tot_cols = [c for c in df_out.columns if str(c).endswith('_Score') and not any(sub in str(c) for sub in ['生物', '化學', '中文', '英文', '數學', '數必', '公民', '企財', '經濟', '地理', '歷史', '中史', '物理', '資通', '視憑', '倫教', '體育', '學培課', '退修課'])]
     tot_col = tot_cols[0] if tot_cols else None
-    avg_score = pd.to_numeric(df[tot_col], errors='coerce').round(1) if tot_col else np.nan
+    
+    if tot_col:
+        avg_score = pd.to_numeric(df_out[tot_col], errors='coerce').round(1)
+    else:
+        avg_score = pd.Series(np.nan, index=df_out.index)
 
-    # 2. 提取中文分數
-    chi_cols = [c for c in df.columns if '中文' in c and 'Score' in c and not any(k in c for k in ['閱讀', '寫作', '聆聽', '口試', '說話'])]
+    # 2. 提取中文分數 (自動合併中英文試卷)
+    chi_cols = [c for c in df_out.columns if '中文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '寫作', '聆聽', '口試', '說話'])]
     chi_series = None
     for cc in chi_cols:
-        s = pd.to_numeric(df[cc], errors='coerce')
+        s = pd.to_numeric(df_out[cc], errors='coerce')
         chi_series = s if chi_series is None else chi_series.fillna(s)
 
-    # 3. 提取英文分數
-    eng_cols = [c for c in df.columns if '英文' in c and 'Score' in c and not any(k in c for k in ['閱讀', '作文', '聆聽', '口試', '語文'])]
+    # 3. 提取英文分數 (自動合併試卷)
+    eng_cols = [c for c in df_out.columns if '英文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '作文', '聆聽', '口試', '語文'])]
     eng_series = None
     for ec in eng_cols:
-        s = pd.to_numeric(df[ec], errors='coerce')
+        s = pd.to_numeric(df_out[ec], errors='coerce')
         eng_series = s if eng_series is None else eng_series.fillna(s)
 
-    # 4. 提取數學必修分數
-    math_cols = [c for c in df.columns if any(k in c for k in ['數必', '數學']) and 'Score' in c and not any(k in c for k in ['數一', '數二', 'M1', 'M2'])]
+    # 4. 提取數學必修分數 (精準合併 _C_Score 與 _E_Score)
+    math_cols = [c for c in df_out.columns if any(k in str(c) for k in ['數必', '數學']) and 'Score' in str(c) and not any(k in str(c) for k in ['數一', '數二', 'M1', 'M2'])]
     math_series = None
     for mc in math_cols:
-        s = pd.to_numeric(df[mc], errors='coerce')
+        s = pd.to_numeric(df_out[mc], errors='coerce')
         math_series = s if math_series is None else math_series.fillna(s)
 
     # 5. 提取公社科 (CS)
-    cs_cols = [c for c in df.columns if any(k in c for k in ['公民科', 'CS']) and any(k in c for k in ['Score', 'Grade'])]
+    cs_cols = [c for c in df_out.columns if any(k in str(c) for k in ['公民科', 'CS']) and any(k in str(c) for k in ['Score', 'Grade'])]
     cs_series = None
     for csc in cs_cols:
-        s = df[csc]
+        s = df_out[csc]
         cs_series = s if cs_series is None else cs_series.fillna(s)
 
-    df['Avg_Score'] = avg_score
-    df['Chi_Score'] = chi_series.round(1) if chi_series is not None else np.nan
-    df['Eng_Score'] = eng_series.round(1) if eng_series is not None else np.nan
-    df['Math_Score'] = math_series.round(1) if math_series is not None else np.nan
-    df['CS_Val'] = cs_series if cs_series is not None else 50
-    return df
+    df_out['Avg_Score'] = avg_score
+    df_out['Chi_Score'] = chi_series.round(1) if chi_series is not None else np.nan
+    df_out['Eng_Score'] = eng_series.round(1) if eng_series is not None else np.nan
+    df_out['Math_Score'] = math_series.round(1) if math_series is not None else np.nan
+    df_out['CS_Val'] = cs_series if cs_series is not None else 50
+    return df_out
 
 # 載入學生中文姓名資料庫
 @st.cache_data
@@ -99,11 +94,11 @@ student_info_df = load_student_info()
 
 st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 
-main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
-    "📚 近兩年學期成績分析 (T1A3/T2A3)", 
-    "🎓 2526HKDSE 成效與門檻對照 (332A22 / 222A22)", 
-    "🔮 中五/中六升學潛質預測與四類名單",
-    "🤖 跨學年 AI 數據建模與預測"
+# 主選單分頁順序調整：建模放在最左邊
+main_tab1, main_tab2, main_tab3 = st.tabs([
+    "🤖 跨學年 AI 數據建模與預測",
+    "🎓 2526HKDSE 公開試成效與中六 T2A3/模擬試對照", 
+    "🔮 校內成績升學預測與四類名單"
 ])
 
 # 側邊欄門檻設定
@@ -120,48 +115,91 @@ sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40
 sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0)
 sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0)
 
-# ==================== 分頁一：學期成績對比 (已修正防崩潰機制) ====================
+# ==================== 分頁一（最左）：AI 跨學年機器學習建模 ====================
 with main_tab1:
-    st.subheader("📚 近兩年學期成績對比（T1A3 上學期 vs T2A3 下學期）")
-    c1, c2 = st.columns(2)
-    with c1: f_t1a3 = st.file_uploader("上傳 上學期考試成績 (T1A3 Excel)", type=["xls", "xlsx"], key="t1a3_up")
-    with c2: f_t2a3 = st.file_uploader("上傳 下學期考試成績 (T2A3 Excel)", type=["xls", "xlsx"], key="t2a3_up")
-
-    if f_t1a3 and f_t2a3:
+    st.subheader("🤖 跨學年 AI 數據建模與升學概率預測")
+    st.write("利用過往畢業生的「校內期末成績（如 S5 T2A3 或 S6 T2A3）」與「2526HKDSE 實際成績」訓練 AI 模型，精準預測現屆學生的升學概率。")
+    
+    col_a, col_b = st.columns(2)
+    with col_a: f_tr_school = st.file_uploader("1. 上傳【過往畢業生】校內期末/模擬試成績 (Excel)", type=["xls", "xlsx"], key="tr_s")
+    with col_b: f_tr_dse = st.file_uploader("2. 上傳【過往畢業生】2526HKDSE 公開試成績 (Excel)", type=["xls", "xlsx"], key="tr_d")
+    
+    if f_tr_school and f_tr_dse and HAS_SKLEARN:
         try:
-            df1 = pd.read_excel(f_t1a3)
-            df2 = pd.read_excel(f_t2a3)
+            d_sch = pd.read_excel(f_tr_school)
+            d_dse = pd.read_excel(f_tr_dse)
             
-            merged = pd.merge(df1, df2, on=['*School Year', '*Class Level', '*Class', '*Class Number', '*Student Name', '*Reg. No.'], suffixes=('_T1A3', '_T2A3'))
-            if student_info_df is not None:
-                merged['Reg_Clean'] = merged['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
-                merged = pd.merge(merged, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
+            d_sch['Reg_Clean'] = d_sch['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+            d_dse['Registration No.'] = d_dse['Registration No.'].astype(str).str.strip()
+            
+            m_ai = pd.merge(d_sch, d_dse, left_on='Reg_Clean', right_on='Registration No.')
+            m_ai = extract_robust_scores(m_ai)
+            
+            m_ai['DSE_Chi'] = m_ai['A010 Chinese'].apply(grade_to_level)
+            m_ai['DSE_Eng'] = m_ai['A020 English'].apply(grade_to_level)
+            m_ai['DSE_Math'] = m_ai['A030 Math Compulsory'].apply(grade_to_level)
+            
+            # 定義訓練標籤：是否達 332 大學門檻
+            m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
+            
+            feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
+            df_train = m_ai.dropna(subset=feats + ['Target_332'])
+            
+            clf = DecisionTreeClassifier(max_depth=3, random_state=42)
+            clf.fit(df_train[feats], df_train['Target_332'])
+            
+            st.success(f"🎉 AI 模型訓練成功！歷史訓練樣本數：{len(df_train)} 人。")
+            
+            st.markdown("##### 📊 關鍵校內指標對 DSE 大學門檻 (332) 的預測影響權重：")
+            imp_df = pd.DataFrame({'校內指標': feats, 'AI 預測影響權重': clf.feature_importances_}).sort_values('AI 預測影響權重', ascending=False)
+            st.dataframe(imp_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            st.markdown("### 🔮 預測【現屆中六】升學概率")
+            f_next_cohort = st.file_uploader("3. 上傳【現屆中六】校內成績表進行概率預測 (Excel)", type=["xls", "xlsx"], key="next_cohort")
+            
+            if f_next_cohort:
+                df_next = pd.read_excel(f_next_cohort)
+                if student_info_df is not None:
+                    df_next['Reg_Clean'] = df_next['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+                    df_next = pd.merge(df_next, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
                 
-            # 安全取值，防止 'int' object has no attribute 'fillna' 錯誤
-            merged['Score_T1A3'] = safe_get_series(merged, ['T1A3_Score', 'T1A3_Score_T1A3', 'Score_T1A3', 'Score'])
-            merged['Score_T2A3'] = safe_get_series(merged, ['T2A3_Score', 'T2A3_Score_T2A3', 'Score_T2A3', 'Score'])
-            merged['Score_Diff'] = (merged['Score_T2A3'] - merged['Score_T1A3']).round(1)
-            
-            st.success(f"✅ 成功配對 {len(merged)} 位學生的 T1A3 與 T2A3 成績！")
-            
-            disp_cols = ['*Class', '*Class Number']
-            if '中文姓名' in merged.columns: disp_cols.append('中文姓名')
-            disp_cols.extend(['*Student Name', 'Score_T1A3', 'Score_T2A3', 'Score_Diff'])
-            
-            st.dataframe(merged[disp_cols].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
-        except Exception as e: st.error(f"檔案處理發生錯誤: {e}")
+                df_next = extract_robust_scores(df_next)
+                
+                # 計算 AI 預測概率
+                probs = clf.predict_proba(df_next[feats].fillna(0))[:, 1]
+                df_next['AI 預測入大學概率 (%)'] = (probs * 100).round(1)
+                
+                def level_tag(p):
+                    if p >= 70: return "🎓 高概率升學 (≥70%)"
+                    elif p >= 35: return "🎯 邊緣衝刺 (35-69%)"
+                    else: return "🛟 保底急救 (<35%)"
+                    
+                df_next['AI 評估分組'] = df_next['AI 預測入大學概率 (%)'].apply(level_tag)
+                
+                disp_ai = ['*Class', '*Class Number']
+                if '中文姓名' in df_next.columns: disp_ai.append('中文姓名')
+                disp_ai.extend(['*Student Name', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score', 'AI 預測入大學概率 (%)', 'AI 評估分組'])
+                
+                st.dataframe(df_next[disp_ai].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
 
-# ==================== 分頁二：HKDSE 公開試門檻對照 ====================
+        except Exception as e: st.error(f"建模或預測失敗: {e}")
+
+# ==================== 分頁二：2526HKDSE 與中六 T2A3 分數對照 ====================
 with main_tab2:
-    st.subheader("🎓 2526HKDSE 公開試實際表現與 332A22 / 222A22 門檻對照")
-    f_dse = st.file_uploader("上傳 2526hkdse.xlsx 公開試成績表", type=["xls", "xlsx"], key="dse_main")
+    st.subheader("🎓 2526HKDSE 公開試實際表現與 332A22 / 222A22 門檻對照（含中六 T2A3 對照）")
+    
+    col_d1, col_d2 = st.columns(2)
+    with col_d1: f_dse = st.file_uploader("1. 上傳 2526hkdse.xlsx 公開試成績表", type=["xls", "xlsx"], key="dse_main")
+    with col_d2: f_s6_t2a3 = st.file_uploader("2. (選填) 上傳中六 T2A3 / 模擬試成績表進行對照", type=["xls", "xlsx"], key="s6_t2a3_dse")
     
     if f_dse:
         try:
             df_dse = pd.read_excel(f_dse)
+            df_dse['Registration No.'] = df_dse['Registration No.'].astype(str).str.strip()
+            
             if student_info_df is not None:
-                df_dse['Reg_Clean'] = df_dse['Registration No.'].astype(str).str.strip()
-                df_dse = pd.merge(df_dse, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
+                df_dse = pd.merge(df_dse, student_info_df, left_on='Registration No.', right_on='註冊編號_clean', how='left')
                 
             df_dse['Chi_Lvl'] = df_dse['A010 Chinese'].apply(grade_to_level)
             df_dse['Eng_Lvl'] = df_dse['A020 English'].apply(grade_to_level)
@@ -170,6 +208,23 @@ with main_tab2:
             df_dse['Met_332A22'] = (df_dse['Chi_Lvl'] >= 3) & (df_dse['Eng_Lvl'] >= 3) & (df_dse['Math_Lvl'] >= 2)
             df_dse['Met_222A22'] = (df_dse['Chi_Lvl'] >= 2) & (df_dse['Eng_Lvl'] >= 2) & (df_dse['Math_Lvl'] >= 2)
             
+            # 若有上傳中六 T2A3 考卷，進行資料配對
+            if f_s6_t2a3:
+                df_s6 = pd.read_excel(f_s6_t2a3)
+                df_s6['Reg_Clean'] = df_s6['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
+                df_s6 = extract_robust_scores(df_s6)
+                
+                # 重新命名中六校內欄位
+                df_s6_sub = df_s6[['Reg_Clean', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']].rename(columns={
+                    'Avg_Score': 'S6_T2A3_總平均分',
+                    'Chi_Score': 'S6_T2A3_中文',
+                    'Eng_Score': 'S6_T2A3_英文',
+                    'Math_Score': 'S6_T2A3_數學'
+                })
+                
+                df_dse = pd.merge(df_dse, df_s6_sub, left_on='Registration No.', right_on='Reg_Clean', how='left')
+                st.success("✅ 成功對照並融合「中六 T2A3 校內分數」與「DSE 實際成績」！")
+
             u_count = df_dse['Met_332A22'].sum()
             sub_count = df_dse['Met_222A22'].sum() - u_count
             base_count = len(df_dse) - df_dse['Met_222A22'].sum()
@@ -180,14 +235,20 @@ with main_tab2:
             with c3: st.metric("🛟 需保底支援 (未達 222)", f"{base_count} 人")
             
             st.divider()
+            
             disp_dse = ['Class', 'Class No.']
             if '中文姓名' in df_dse.columns: disp_dse.append('中文姓名')
-            disp_dse.extend(['Name', 'A010 Chinese', 'A020 English', 'A030 Math Compulsory', 'Met_332A22', 'Met_222A22'])
+            disp_dse.append('Name')
+            
+            if f_s6_t2a3:
+                disp_dse.extend(['S6_T2A3_總平均分', 'S6_T2A3_中文', 'S6_T2A3_英文', 'S6_T2A3_數學'])
+                
+            disp_dse.extend(['A010 Chinese', 'A020 English', 'A030 Math Compulsory', 'Met_332A22', 'Met_222A22'])
             
             st.dataframe(df_dse[disp_dse], use_container_width=True, hide_index=True)
-        except Exception as e: st.error(f"DSE 檔案讀取失敗: {e}")
+        except Exception as e: st.error(f"DSE 檔案讀取或對照失敗: {e}")
 
-# ==================== 分頁三：升學潛質名單產出 (包含特別支援名單) ====================
+# ==================== 分頁三：校內成績預測與四類名單 ====================
 with main_tab3:
     st.subheader("🔮 校內成績預測：產生「大學」、「特別支援（差一科）」、「大專」及「保底」名單")
     f_eval = st.file_uploader("上傳校內成績表 (Excel)", type=["xls", "xlsx"], key="eval_up")
@@ -222,12 +283,16 @@ with main_tab3:
                 cond_names = ['總平均分', '中文', '英文', '數學', '公社科']
                 failed_conds = [cond_names[i] for i, passed in enumerate(cond_u) if not passed]
                 
+                # 1. 全部達標 -> 潛質入大學
                 if all(cond_u):
                     return pd.Series(["🎓 潛質入大學名單 (332A22)", "全科達標"])
+                # 2. 差 1 科達標 -> 特別支援名單
                 elif len(failed_conds) == 1:
                     return pd.Series(["🎯 特別支援名單 (差一科入大學)", f"僅未達標：{failed_conds[0]}"])
+                # 3. 達大專門檻 -> 潛質入大專
                 elif pd.notna(s) and pd.notna(c) and pd.notna(e) and pd.notna(m) and s >= sub_score_thresh and c >= sub_chi_thresh and e >= sub_eng_thresh and m >= sub_math_thresh and cs_ok:
                     return pd.Series(["🏫 潛質入大專名單 (222A22)", "達大專要求"])
+                # 4. 保底求合格
                 else:
                     return pd.Series(["🛟 保底求合格名單 (關鍵科需支援)", f"未達標科目：{', '.join(failed_conds)}"])
             
@@ -263,38 +328,3 @@ with main_tab3:
                 st.dataframe(df_ev[df_ev['升學類別'].str.contains("保底求合格")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
 
         except Exception as e: st.error(f"分析失敗: {e}")
-
-# ==================== 分頁四：AI 跨學年機器學習建模 ====================
-with main_tab4:
-    st.subheader("🤖 跨學年 AI 數據建模與預測")
-    col_a, col_b = st.columns(2)
-    with col_a: f_tr_school = st.file_uploader("1. 上傳【過往畢業生】校內期末成績 (Excel)", type=["xls", "xlsx"], key="tr_s")
-    with col_b: f_tr_dse = st.file_uploader("2. 上傳【過往畢業生】2526HKDSE 公開試 (Excel)", type=["xls", "xlsx"], key="tr_d")
-    
-    if f_tr_school and f_tr_dse and HAS_SKLEARN:
-        try:
-            d_sch = pd.read_excel(f_tr_school)
-            d_dse = pd.read_excel(f_tr_dse)
-            
-            d_sch['Reg_Clean'] = d_sch['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
-            d_dse['Registration No.'] = d_dse['Registration No.'].astype(str).str.strip()
-            
-            m_ai = pd.merge(d_sch, d_dse, left_on='Reg_Clean', right_on='Registration No.')
-            m_ai = extract_robust_scores(m_ai)
-            
-            m_ai['DSE_Chi'] = m_ai['A010 Chinese'].apply(grade_to_level)
-            m_ai['DSE_Eng'] = m_ai['A020 English'].apply(grade_to_level)
-            m_ai['DSE_Math'] = m_ai['A030 Math Compulsory'].apply(grade_to_level)
-            m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
-            
-            feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
-            df_train = m_ai.dropna(subset=feats + ['Target_332'])
-            
-            clf = DecisionTreeClassifier(max_depth=3, random_state=42)
-            clf.fit(df_train[feats], df_train['Target_332'])
-            
-            st.success(f"🎉 AI 模型訓練成功！訓練樣本數：{len(df_train)} 人。")
-            imp_df = pd.DataFrame({'指標': feats, '預測影響權重': clf.feature_importances_}).sort_values('預測影響權重', ascending=False)
-            st.dataframe(imp_df, use_container_width=True, hide_index=True)
-            
-        except Exception as e: st.error(f"建模失敗: {e}")
