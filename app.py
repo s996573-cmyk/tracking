@@ -412,32 +412,23 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526 屆"):
     
     return clean_df, df_all_corr, res_comp_df, None
 
-# 優先提取決策樹「最頂層主幹（根節點）」切分門檻
+# 專門根據成功考獲 DSE 332 大學門檻學生提煉『真實最低入場分數線 (P10 基準)』
 def extract_ai_thresholds(clf, df_train, feats):
-    thresholds = {}
-    for i in range(clf.tree_.node_count):
-        f_idx = clf.tree_.feature[i]
-        if f_idx >= 0:
-            f_name = feats[f_idx]
-            t_val = round(float(clf.tree_.threshold[i]), 2)
-            if f_name not in thresholds:
-                thresholds[f_name] = t_val
-                
     successful_df = df_train[df_train['Target_332'] == 1]
     
     defaults = {
-        'Avg_Score': 55.0,
-        'Chi_Score': 52.0,
-        'Eng_Score': 55.0,
-        'Math_Score': 40.0
+        'Avg_Score': 45.0,
+        'Chi_Score': 48.0,
+        'Eng_Score': 50.0,
+        'Math_Score': 38.0
     }
     
     final_thresh = {}
+    
+    # 使用成功達 332 門檻學生的 P10 (10th percentile - 覆蓋 90% 成功學生之校內最低得分)
     for f in feats:
-        if f in thresholds:
-            final_thresh[f] = thresholds[f]
-        elif not successful_df.empty and f in successful_df.columns:
-            val = round(float(successful_df[f].quantile(0.10)), 2)
+        if not successful_df.empty and f in successful_df.columns:
+            val = round(float(successful_df[f].quantile(0.10)), 1)
             final_thresh[f] = val
         else:
             final_thresh[f] = defaults[f]
@@ -467,10 +458,10 @@ main_tab1, main_tab2 = st.tabs([
 ])
 
 # 初始化 session state 預設門檻變數
-if 'u_score_val' not in st.session_state: st.session_state['u_score_val'] = 55.0
-if 'u_chi_val' not in st.session_state: st.session_state['u_chi_val'] = 52.0
-if 'u_eng_val' not in st.session_state: st.session_state['u_eng_val'] = 55.0
-if 'u_math_val' not in st.session_state: st.session_state['u_math_val'] = 40.0
+if 'u_score_val' not in st.session_state: st.session_state['u_score_val'] = 45.0
+if 'u_chi_val' not in st.session_state: st.session_state['u_chi_val'] = 48.0
+if 'u_eng_val' not in st.session_state: st.session_state['u_eng_val'] = 50.0
+if 'u_math_val' not in st.session_state: st.session_state['u_math_val'] = 38.0
 if 'u_cs_val' not in st.session_state: st.session_state['u_cs_val'] = 40.0
 
 # 側邊欄門檻設定
@@ -556,7 +547,7 @@ with main_tab1:
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
             
-            # 提煉 AI 最佳切分門檻
+            # 提煉 AI 最佳切分門檻 (採用 P10 最優保底門檻)
             ai_thresh = extract_ai_thresholds(clf, df_train, feats)
             
             mapping = {
@@ -577,7 +568,7 @@ with main_tab1:
                 st.session_state['ai_updated_flag'] = True
                 st.rerun()
 
-            st.success(f"🎉 AI 模型訓練成功！已合併 {len(train_dfs)} 套歷史數據（總訓練樣本數：{len(df_train)} 人），並將主幹最優切分線同步至左側大學門檻設定。")
+            st.success(f"🎉 AI 模型訓練成功！已合併 {len(train_dfs)} 套歷史數據（總訓練樣本數：{len(df_train)} 人），並將 332 成功達標群組的最優入場門檻 (P10 基準) 同步至左側大學門檻設定。")
             
             col_tree1, col_tree2 = st.columns([1, 1])
             with col_tree1:
