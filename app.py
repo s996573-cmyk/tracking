@@ -576,6 +576,15 @@ with main_tab3:
             
             df_ev = extract_robust_scores(df_ev)
             
+            # 自動提取所有選修科成績
+            elective_cols_added = []
+            for sub in SUBJECT_MAP[3:]: # 選修科配置
+                s = get_school_subject_score(df_ev, sub['sch_keys'], sub['sch_ex'])
+                if s is not None and s.notna().sum() > 0:
+                    col_name = sub['name']
+                    df_ev[col_name] = s.round(1)
+                    elective_cols_added.append(col_name)
+
             def cs_is_attained(cs_val):
                 if pd.isna(cs_val): return False
                 val_str = str(cs_val).strip().upper()
@@ -607,6 +616,15 @@ with main_tab3:
                     return pd.Series(["🛟 保底求合格名單 (關鍵科需支援)", f"未達標科目：{', '.join(failed_conds)}"])
             
             df_ev[['升學類別', '診斷與提示']] = df_ev.apply(categorize_student, axis=1)
+            
+            # 重命名主科欄位以保持簡潔
+            df_ev = df_ev.rename(columns={
+                'Avg_Score': '總平均分',
+                'Chi_Score': '中文科',
+                'Eng_Score': '英文科',
+                'Math_Score': '數學必修'
+            })
+            
             counts = df_ev['升學類別'].value_counts()
             
             m1, m2, m3, m4 = st.columns(4)
@@ -629,7 +647,11 @@ with main_tab3:
             if '*Class Number' in df_ev.columns: disp_ev.append('*Class Number')
             if '中文姓名' in df_ev.columns: disp_ev.append('中文姓名')
             if '*Student Name' in df_ev.columns: disp_ev.append('*Student Name')
-            disp_ev.extend(['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score', '升學類別', '診斷與提示'])
+            
+            # 依序放入主科與所有選修科分數
+            disp_ev.extend(['總平均分', '中文科', '英文科', '數學必修'])
+            disp_ev.extend(elective_cols_added)
+            disp_ev.extend(['升學類別', '診斷與提示'])
             
             sort_cols = [c for c in ['*Class', '*Class Number'] if c in df_ev.columns]
             
