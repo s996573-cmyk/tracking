@@ -42,65 +42,228 @@ def clean_id(v):
 
 # 健壯的 DSE 成績等級轉數值函數
 def parse_dse_grade(val):
-    if pd.isna(val): return 0
+    if pd.isna(val): return np.nan
     s = str(val).strip().upper()
-    
+    if s in ['N.T.', 'N.A.', 'ABS', 'X', '', 'NAN']: return np.nan
     if '5**' in s: return 7
     if '5*' in s: return 6
-    
     exact_map = {
         '5': 5, '5.0': 5, 'LEVEL 5': 5, 'LV 5': 5, 'LV5': 5, '5級': 5, '第5級': 5,
         '4': 4, '4.0': 4, 'LEVEL 4': 4, 'LV 4': 4, 'LV4': 4, '4級': 4, '第4級': 4,
         '3': 3, '3.0': 3, 'LEVEL 3': 3, 'LV 3': 3, 'LV3': 3, '3級': 3, '第3級': 3,
         '2': 2, '2.0': 2, 'LEVEL 2': 2, 'LV 2': 2, 'LV2': 2, '2級': 2, '第2級': 2,
         '1': 1, '1.0': 1, 'LEVEL 1': 1, 'LV 1': 1, 'LV1': 1, '1級': 1, '第1級': 1,
-        'U': 0, '0': 0, '0.0': 0, 'UNCLASSIFIED': 0, 'ABS': 0, 'UNATTAINED': 0, '不達標': 0,
+        'U': 0, '0': 0, '0.0': 0, 'UNCLASSIFIED': 0, 'UNATTAINED': 0, '不達標': 0,
         'A': 3, 'B': 3, 'C': 3, 'D': 3, 'E': 3, 'PASS': 3, 'ATTAINED': 3, '達標': 3
     }
-    
     if s in exact_map: return exact_map[s]
-        
     try:
         v = float(s)
-        if 1 <= v <= 7: return int(round(v))
+        if 0 <= v <= 7: return v
     except: pass
-        
-    return 0
+    return np.nan
+
+# 欄位搜尋輔助函數
+def find_col(columns, inc_keys, exc_keys):
+    candidates = []
+    for c in columns:
+        c_str = str(c).upper()
+        if any(k.upper() in c_str for k in inc_keys):
+            if not any(ex.upper() in c_str for ex in exc_keys):
+                candidates.append(c)
+    if candidates:
+        candidates.sort(key=lambda x: len(str(x)))
+        return candidates[0]
+    return None
 
 # 精準鎖定 DSE 科目總成績欄位 (自動排除姓名及分卷)
 def find_best_dse_subject_col(columns, subject_keywords, exclude_keywords=None):
     if exclude_keywords is None: exclude_keywords = []
     default_excludes = ['NAME', '姓名', 'READING', 'WRITING', 'LISTENING', 'SPEAKING', 'PAPER', '卷', '閱讀', '寫作', '聆聽', '說話', '口試', 'SCORE', 'MARK', '分數', '分值', 'COMPONENT', 'PART', 'INTEGRATED', 'HISTORY', '歷史']
     all_excludes = set([k.upper() for k in (exclude_keywords + default_excludes)])
-    
-    candidate_cols = []
-    for col in columns:
-        col_str = str(col).upper()
-        if any(k.upper() in col_str for k in subject_keywords):
-            if not any(ex in col_str for ex in all_excludes):
-                candidate_cols.append(col)
+    return find_col(columns, subject_keywords, list(all_excludes))
+
+# 所有學科配置表（包含核心科與選修科）
+SUBJECT_MAP = [
+    {
+        'name': '中文科',
+        'sch_keys': ['中文'],
+        'dse_keys': ['A010', 'CHINESE', '中文'],
+        'sch_ex': ['閱讀', '寫作', '聆聽', '口試', '說話', '中史'],
+        'dse_ex': ['NAME', '姓名', 'READING', 'WRITING', 'LISTENING', 'SPEAKING', 'PAPER', '卷', '閱讀', '寫作', '聆聽', '說話', '口試', 'INTEGRATED', 'HISTORY', '歷史']
+    },
+    {
+        'name': '英文科',
+        'sch_keys': ['英文'],
+        'dse_keys': ['A020', 'ENGLISH', '英文'],
+        'sch_ex': ['閱讀', '作文', '聆聽', '口試', '說話', '語文'],
+        'dse_ex': ['NAME', '姓名', 'READING', 'WRITING', 'LISTENING', 'SPEAKING', 'PAPER', '卷', '閱讀', '寫作', '聆聽', '說話', '口試', 'INTEGRATED']
+    },
+    {
+        'name': '數學必修',
+        'sch_keys': ['數必', '數學'],
+        'dse_keys': ['A030', 'MATH COMPULSORY', '數學必修'],
+        'sch_ex': ['數一', '數二', 'M1', 'M2', 'EXTENDED', '單元'],
+        'dse_ex': ['M1', 'M2', '數一', '數二', 'EXTENDED', '單元']
+    },
+    {
+        'name': '數學延伸 (M1/M2)',
+        'sch_keys': ['數一', '數二', 'M1', 'M2'],
+        'dse_keys': ['A031', 'A032', 'M1', 'M2'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '中國歷史',
+        'sch_keys': ['中史'],
+        'dse_keys': ['A070', 'CHINESE HISTORY', '中史'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '經濟科',
+        'sch_keys': ['經濟'],
+        'dse_keys': ['A080', 'ECONOMICS', '經濟'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '倫理與宗教',
+        'sch_keys': ['倫宗', '倫教'],
+        'dse_keys': ['A090', 'ETHICS', 'RELIGIOUS', '倫理', '宗教'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '地理科',
+        'sch_keys': ['地理'],
+        'dse_keys': ['A100', 'GEOGRAPHY', '地理'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '歷史科',
+        'sch_keys': ['歷史'],
+        'dse_keys': ['A110', 'HISTORY', '歷史'],
+        'sch_ex': ['中史'],
+        'dse_ex': ['CHINESE HISTORY', '中史']
+    },
+    {
+        'name': '生物科',
+        'sch_keys': ['生物'],
+        'dse_keys': ['A130', 'BIOLOGY', '生物'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '化學科',
+        'sch_keys': ['化學'],
+        'dse_keys': ['A140', 'CHEMISTRY', '化學'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '物理科',
+        'sch_keys': ['物理'],
+        'dse_keys': ['A150', 'PHYSICS', '物理'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '企業、會計與財務概論 (BAFS)',
+        'sch_keys': ['企財', 'BAFS'],
+        'dse_keys': ['A171', 'A172', 'BAFS', '企財', '企業'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '資訊及通訊科技 (ICT)',
+        'sch_keys': ['資通', 'ICT'],
+        'dse_keys': ['A200', 'ICT', '資訊'],
+        'sch_ex': [],
+        'dse_ex': []
+    },
+    {
+        'name': '視覺藝術',
+        'sch_keys': ['視憑', '視藝'],
+        'dse_keys': ['A230', 'VISUAL ARTS', '視藝', '視覺藝術'],
+        'sch_ex': [],
+        'dse_ex': []
+    }
+]
+
+# 自動整合校內試（含中英文組別 C_Score / E_Score）分數
+def get_school_subject_score(df, subject_keys, exclude_keys):
+    matched_cols = []
+    for c in df.columns:
+        c_str = str(c).upper()
+        if 'SCORE' in c_str and any(k.upper() in c_str for k in subject_keys):
+            if not any(ex.upper() in c_str for ex in exclude_keys):
+                matched_cols.append(c)
                 
-    if candidate_cols:
-        candidate_cols.sort(key=lambda c: len(str(c)))
-        return candidate_cols[0]
+    if not matched_cols:
+        return None
         
-    fallback_cols = []
-    for col in columns:
-        col_str = str(col).upper()
-        if any(k.upper() in col_str for k in subject_keywords):
-            if not any(ex in col_str for ex in ['NAME', '姓名']):
-                fallback_cols.append(col)
-    if fallback_cols:
-        fallback_cols.sort(key=lambda c: len(str(c)))
-        return fallback_cols[0]
+    combined_series = None
+    for col in matched_cols:
+        s = pd.to_numeric(df[col], errors='coerce')
+        combined_series = s if combined_series is None else combined_series.fillna(s)
         
-    return None
+    return combined_series
+
+# 全學科（主科 + 各選修科）相關係數分析表產生器
+def compute_all_subjects_correlation(d_sch, d_dse):
+    sch_reg_cols = [c for c in d_sch.columns if '*Reg. No.' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c) or '學號' in str(c)]
+    sch_reg = sch_reg_cols[0] if sch_reg_cols else d_sch.columns[0]
+    d_sch['Reg_Clean'] = d_sch[sch_reg].apply(clean_id)
+    
+    dse_reg_cols = [c for c in d_dse.columns if 'Registration No' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c) or '學號' in str(c)]
+    dse_reg = dse_reg_cols[0] if dse_reg_cols else d_dse.columns[0]
+    d_dse['Reg_Clean'] = d_dse[dse_reg].apply(clean_id)
+    
+    m_pair = pd.merge(d_sch, d_dse, on='Reg_Clean')
+    
+    results = []
+    for sub in SUBJECT_MAP:
+        sch_s = get_school_subject_score(m_pair, sub['sch_keys'], sub['sch_ex'])
+        dse_col = find_col(d_dse.columns, sub['dse_keys'], sub['dse_ex'])
+        
+        if sch_s is not None and dse_col is not None:
+            dse_g = m_pair[dse_col].apply(parse_dse_grade)
+            valid_mask = sch_s.notna() & dse_g.notna()
+            n_students = valid_mask.sum()
+            
+            if n_students >= 3:
+                r_val = sch_s[valid_mask].corr(dse_g[valid_mask])
+                if not pd.isna(r_val):
+                    abs_r = abs(r_val)
+                    if abs_r >= 0.8:
+                        strength = "🔴 極高關聯 (試卷對照度極佳)"
+                    elif abs_r >= 0.6:
+                        strength = "🟠 高度關聯 (試卷對照度良好)"
+                    elif abs_r >= 0.4:
+                        strength = "🟡 中度關聯 (建議檢視深淺度)"
+                    elif abs_r >= 0.2:
+                        strength = "🟢 低度關聯 (需優化考核指標)"
+                    else:
+                        strength = "⚪ 極低關聯 (擬題方向待調整)"
+                        
+                    results.append({
+                        '學科名稱': sub['name'],
+                        '修讀對照人數': int(n_students),
+                        '校內分數 vs DSE 等級 相關係數 (r)': round(r_val, 3),
+                        '試卷效度與關聯評語': strength
+                    })
+                    
+    df_res = pd.DataFrame(results)
+    if not df_res.empty:
+        df_res = df_res.sort_values(by='校內分數 vs DSE 等級 相關係數 (r)', ascending=False)
+    return df_res
 
 # 健壯的核心科目校內成績自動提取函數
 def extract_robust_scores(df):
     df_out = df.copy()
     
-    # 1. 提取總平均分
     tot_cols = [c for c in ['T2A3_Score', 'T1A3_Score', 'T2A1_Score', 'T1A1_Score', 'Score'] if c in df_out.columns]
     if not tot_cols:
         tot_cols = [c for c in df_out.columns if str(c).endswith('_Score') and not any(sub in str(c) for sub in ['生物', '化學', '中文', '英文', '數學', '數必', '公民', '企財', '經濟', '地理', '歷史', '中史', '物理', '資通', '視憑', '倫教', '體育', '學培課', '退修課'])]
@@ -108,28 +271,10 @@ def extract_robust_scores(df):
     
     avg_score = pd.to_numeric(df_out[tot_col], errors='coerce').round(1) if tot_col else pd.Series(np.nan, index=df_out.index)
 
-    # 2. 提取中文分數
-    chi_cols = [c for c in df_out.columns if '中文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '寫作', '聆聽', '口試', '說話'])]
-    chi_series = None
-    for cc in chi_cols:
-        s = pd.to_numeric(df_out[cc], errors='coerce')
-        chi_series = s if chi_series is None else chi_series.fillna(s)
+    chi_series = get_school_subject_score(df_out, ['中文'], ['閱讀', '寫作', '聆聽', '口試', '說話', '中史'])
+    eng_series = get_school_subject_score(df_out, ['英文'], ['閱讀', '作文', '聆聽', '口試', '語文'])
+    math_series = get_school_subject_score(df_out, ['數必', '數學'], ['數一', '數二', 'M1', 'M2', 'EXTENDED', '單元'])
 
-    # 3. 提取英文分數
-    eng_cols = [c for c in df_out.columns if '英文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '作文', '聆聽', '口試', '語文'])]
-    eng_series = None
-    for ec in eng_cols:
-        s = pd.to_numeric(df_out[ec], errors='coerce')
-        eng_series = s if eng_series is None else eng_series.fillna(s)
-
-    # 4. 提取數學必修分數
-    math_cols = [c for c in df_out.columns if any(k in str(c) for k in ['數必', '數學']) and 'Score' in str(c) and not any(k in str(c) for k in ['數一', '數二', 'M1', 'M2'])]
-    math_series = None
-    for mc in math_cols:
-        s = pd.to_numeric(df_out[mc], errors='coerce')
-        math_series = s if math_series is None else math_series.fillna(s)
-
-    # 5. 提取公社科 (CS)
     cs_cols = [c for c in df_out.columns if any(k in str(c) for k in ['公民科', 'CS']) and any(k in str(c) for k in ['Score', 'Grade'])]
     cs_series = None
     for csc in cs_cols:
@@ -143,60 +288,15 @@ def extract_robust_scores(df):
     df_out['CS_Val'] = cs_series if cs_series is not None else 50
     return df_out
 
-# 計算數據集中各學科與 DSE 成績及升學門檻的相關係數表格
-def get_correlation_table(clean_df):
-    corr_records = [
-        {
-            '指標 / 科目': '中文科',
-            '校內分數 vs DSE 等級 (r)': round(clean_df['Chi_Score'].corr(clean_df['DSE_Chi']), 3) if 'DSE_Chi' in clean_df.columns else np.nan,
-            '校內分數 vs 升大學 332 (r)': round(clean_df['Chi_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
-        },
-        {
-            '指標 / 科目': '英文科',
-            '校內分數 vs DSE 等級 (r)': round(clean_df['Eng_Score'].corr(clean_df['DSE_Eng']), 3) if 'DSE_Eng' in clean_df.columns else np.nan,
-            '校內分數 vs 升大學 332 (r)': round(clean_df['Eng_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
-        },
-        {
-            '指標 / 科目': '數學科',
-            '校內分數 vs DSE 等級 (r)': round(clean_df['Math_Score'].corr(clean_df['DSE_Math']), 3) if 'DSE_Math' in clean_df.columns else np.nan,
-            '校內分數 vs 升大學 332 (r)': round(clean_df['Math_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
-        },
-        {
-            '指標 / 科目': '總平均分',
-            '校內分數 vs DSE 等級 (r)': np.nan,
-            '校內分數 vs 升大學 332 (r)': round(clean_df['Avg_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
-        }
-    ]
-    df_corr = pd.DataFrame(corr_records)
-
-    def get_corr_strength(val):
-        if pd.isna(val) or str(val) == '-': return '-'
-        try:
-            r = float(val)
-            abs_r = abs(r)
-            if abs_r >= 0.8: return f"{r:.3f} (極高相關 🔴)"
-            elif abs_r >= 0.6: return f"{r:.3f} (高度相關 🟠)"
-            elif abs_r >= 0.4: return f"{r:.3f} (中度相關 🟡)"
-            elif abs_r >= 0.2: return f"{r:.3f} (低度相關 🟢)"
-            else: return f"{r:.3f} (極低相關 ⚪)"
-        except:
-            return str(val)
-
-    df_corr['校內 vs DSE 等級強度'] = df_corr['校內分數 vs DSE 等級 (r)'].apply(get_corr_strength)
-    df_corr['校內 vs 升大學 332 強度'] = df_corr['校內分數 vs 升大學 332 (r)'].apply(get_corr_strength)
-    return df_corr
-
 # 通用過往畢業生數據對照與清洗處理
 def process_training_pair(f_sch, f_dse):
     d_sch = safe_read_file(f_sch)
     d_dse = safe_read_file(f_dse)
     
-    # 鎖定校內 *Reg. No. 欄位
     sch_reg_cols = [c for c in d_sch.columns if '*Reg. No.' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c) or '學號' in str(c)]
     sch_reg = sch_reg_cols[0] if sch_reg_cols else d_sch.columns[0]
     d_sch['Reg_Clean'] = d_sch[sch_reg].apply(clean_id)
     
-    # 鎖定 DSE Registration No. 欄位
     dse_reg_cols = [c for c in d_dse.columns if 'Registration No' in str(c) or 'Reg' in str(c) or '註冊編號' in str(c) or '學號' in str(c)]
     dse_reg = dse_reg_cols[0] if dse_reg_cols else d_dse.columns[0]
     d_dse['Reg_Clean'] = d_dse[dse_reg].apply(clean_id)
@@ -207,7 +307,6 @@ def process_training_pair(f_sch, f_dse):
         
     m_ai = extract_robust_scores(m_ai)
     
-    # 精準尋找 DSE 主科欄位 (排除 Chinese Name)
     chi_col = find_best_dse_subject_col(d_dse.columns, ['A010', 'CHINESE', '中文'])
     eng_col = find_best_dse_subject_col(d_dse.columns, ['A020', 'ENGLISH', '英文'])
     math_col = find_best_dse_subject_col(d_dse.columns, ['A030', 'MATH', '數學'], ['M1', 'M2', '數一', '數二', 'EXTENDED', '單元'])
@@ -224,10 +323,10 @@ def process_training_pair(f_sch, f_dse):
     feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
     clean_df = m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332', 'DSE_Chi', 'DSE_Eng', 'DSE_Math']]
     
-    # 計算該套數據的各科相關係數
-    df_corr = get_correlation_table(clean_df)
+    # 計算全學科相關係數表
+    df_all_corr = compute_all_subjects_correlation(d_sch, d_dse)
     
-    return clean_df, df_corr, None
+    return clean_df, df_all_corr, None
 
 # 優先提取決策樹「最頂層主幹（根節點）」切分門檻
 def extract_ai_thresholds(clf, df_train, feats):
@@ -328,7 +427,7 @@ with main_tab1:
             st.error(f"第一套數據：{err1}")
         elif not df1.empty:
             train_dfs.append(df1)
-            with st.expander("📈 檢視【第一套數據】各學科相關係數分析 (Correlation Analysis)", expanded=True):
+            with st.expander("📈 檢視【第一套數據】全學科試卷關聯度與效度分析 (All-Subject Correlation Analysis)", expanded=True):
                 st.dataframe(corr_df1, use_container_width=True, hide_index=True)
             
     st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 選填，增加樣本量與精準度)")
@@ -343,18 +442,13 @@ with main_tab1:
             st.error(f"第二套數據：{err2}")
         elif not df2.empty:
             train_dfs.append(df2)
-            with st.expander("📈 檢視【第二套數據】各學科相關係數分析 (Correlation Analysis)", expanded=True):
+            with st.expander("📈 檢視【第二套數據】全學科試卷關聯度與效度分析 (All-Subject Correlation Analysis)", expanded=True):
                 st.dataframe(corr_df2, use_container_width=True, hide_index=True)
 
     if train_dfs and HAS_SKLEARN:
         try:
             df_train = pd.concat(train_dfs, ignore_index=True)
             feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
-            
-            if len(train_dfs) > 1:
-                st.markdown("##### 📈 兩套數據合併後之總體學科相關係數：")
-                corr_combined = get_correlation_table(df_train)
-                st.dataframe(corr_combined, use_container_width=True, hide_index=True)
             
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
