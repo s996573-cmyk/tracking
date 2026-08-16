@@ -143,6 +143,49 @@ def extract_robust_scores(df):
     df_out['CS_Val'] = cs_series if cs_series is not None else 50
     return df_out
 
+# 計算數據集中各學科與 DSE 成績及升學門檻的相關係數表格
+def get_correlation_table(clean_df):
+    corr_records = [
+        {
+            '指標 / 科目': '中文科',
+            '校內分數 vs DSE 等級 (r)': round(clean_df['Chi_Score'].corr(clean_df['DSE_Chi']), 3) if 'DSE_Chi' in clean_df.columns else np.nan,
+            '校內分數 vs 升大學 332 (r)': round(clean_df['Chi_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
+        },
+        {
+            '指標 / 科目': '英文科',
+            '校內分數 vs DSE 等級 (r)': round(clean_df['Eng_Score'].corr(clean_df['DSE_Eng']), 3) if 'DSE_Eng' in clean_df.columns else np.nan,
+            '校內分數 vs 升大學 332 (r)': round(clean_df['Eng_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
+        },
+        {
+            '指標 / 科目': '數學科',
+            '校內分數 vs DSE 等級 (r)': round(clean_df['Math_Score'].corr(clean_df['DSE_Math']), 3) if 'DSE_Math' in clean_df.columns else np.nan,
+            '校內分數 vs 升大學 332 (r)': round(clean_df['Math_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
+        },
+        {
+            '指標 / 科目': '總平均分',
+            '校內分數 vs DSE 等級 (r)': np.nan,
+            '校內分數 vs 升大學 332 (r)': round(clean_df['Avg_Score'].corr(clean_df['Target_332']), 3) if 'Target_332' in clean_df.columns else np.nan,
+        }
+    ]
+    df_corr = pd.DataFrame(corr_records)
+
+    def get_corr_strength(val):
+        if pd.isna(val) or str(val) == '-': return '-'
+        try:
+            r = float(val)
+            abs_r = abs(r)
+            if abs_r >= 0.8: return f"{r:.3f} (極高相關 🔴)"
+            elif abs_r >= 0.6: return f"{r:.3f} (高度相關 🟠)"
+            elif abs_r >= 0.4: return f"{r:.3f} (中度相關 🟡)"
+            elif abs_r >= 0.2: return f"{r:.3f} (低度相關 🟢)"
+            else: return f"{r:.3f} (極低相關 ⚪)"
+        except:
+            return str(val)
+
+    df_corr['校內 vs DSE 等級強度'] = df_corr['校內分數 vs DSE 等級 (r)'].apply(get_corr_strength)
+    df_corr['校內 vs 升大學 332 強度'] = df_corr['校內分數 vs 升大學 332 (r)'].apply(get_corr_strength)
+    return df_corr
+
 # 通用過往畢業生數據對照與清洗處理
 def process_training_pair(f_sch, f_dse):
     d_sch = safe_read_file(f_sch)
@@ -160,7 +203,7 @@ def process_training_pair(f_sch, f_dse):
     
     m_ai = pd.merge(d_sch, d_dse, on='Reg_Clean')
     if len(m_ai) == 0:
-        return pd.DataFrame(), f"⚠️ 對照失敗：無法透過校內【{sch_reg}】與 DSE【{dse_reg}】匹配學生身份，請確認兩檔學號是否相符。"
+        return pd.DataFrame(), pd.DataFrame(), f"⚠️ 對照失敗：無法透過校內【{sch_reg}】與 DSE【{dse_reg}】匹配學生身份，請確認兩檔學號是否相符。"
         
     m_ai = extract_robust_scores(m_ai)
     
@@ -170,7 +213,7 @@ def process_training_pair(f_sch, f_dse):
     math_col = find_best_dse_subject_col(d_dse.columns, ['A030', 'MATH', '數學'], ['M1', 'M2', '數一', '數二', 'EXTENDED', '單元'])
     
     if not (chi_col and eng_col and math_col):
-        return pd.DataFrame(), "⚠️ DSE 核心科目欄位辨識失敗：DSE 表格需包含中文、英文及數學必修部分成績。"
+        return pd.DataFrame(), pd.DataFrame(), "⚠️ DSE 核心科目欄位辨識失敗：DSE 表格需包含中文、英文及數學必修部分成績。"
         
     m_ai['DSE_Chi'] = m_ai[chi_col].apply(parse_dse_grade)
     m_ai['DSE_Eng'] = m_ai[eng_col].apply(parse_dse_grade)
@@ -179,8 +222,12 @@ def process_training_pair(f_sch, f_dse):
     m_ai['Target_332'] = ((m_ai['DSE_Chi'] >= 3) & (m_ai['DSE_Eng'] >= 3) & (m_ai['DSE_Math'] >= 2)).astype(int)
     
     feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
-    clean_df = m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332']]
-    return clean_df, None
+    clean_df = m_ai.dropna(subset=feats + ['Target_332'])[feats + ['Target_332', 'DSE_Chi', 'DSE_Eng', 'DSE_Math']]
+    
+    # 計算該套數據的各科相關係數
+    df_corr = get_correlation_table(clean_df)
+    
+    return clean_df, df_corr, None
 
 # 優先提取決策樹「最頂層主幹（根節點）」切分門檻
 def extract_ai_thresholds(clf, df_train, feats):
@@ -272,29 +319,42 @@ with main_tab1:
     with col_a1: f_tr_school_1 = st.file_uploader("1A. 上傳【2526 屆】校內模擬試/期末成績 (*Reg. No.)", type=["xls", "xlsx", "csv"], key="tr_s_1")
     with col_b1: f_tr_dse_1 = st.file_uploader("1B. 上傳【2526 屆】2526HKDSE 公開試成績 (Registration No.)", type=["xls", "xlsx", "csv"], key="tr_d_1")
     
-    st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 選填，增加樣本量與精準度)")
-    col_a2, col_b2 = st.columns(2)
-    with col_a2: f_tr_school_2 = st.file_uploader("2A. (選填) 上傳【2425 屆】校內模擬試/期末成績 (*Reg. No.)", type=["xls", "xlsx", "csv"], key="tr_s_2")
-    with col_b2: f_tr_dse_2 = st.file_uploader("2B. (選填) 上傳【2425 屆】2425HKDSE 公開試成績 (Registration No.)", type=["xls", "xlsx", "csv"], key="tr_d_2")
-    
     train_dfs = []
     
     # 處理第一套
     if f_tr_school_1 and f_tr_dse_1:
-        df1, err1 = process_training_pair(f_tr_school_1, f_tr_dse_1)
-        if err1: st.error(f"第一套數據：{err1}")
-        elif not df1.empty: train_dfs.append(df1)
+        df1, corr_df1, err1 = process_training_pair(f_tr_school_1, f_tr_dse_1)
+        if err1:
+            st.error(f"第一套數據：{err1}")
+        elif not df1.empty:
+            train_dfs.append(df1)
+            with st.expander("📈 檢視【第一套數據】各學科相關係數分析 (Correlation Analysis)", expanded=True):
+                st.dataframe(corr_df1, use_container_width=True, hide_index=True)
             
+    st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 選填，增加樣本量與精準度)")
+    col_a2, col_b2 = st.columns(2)
+    with col_a2: f_tr_school_2 = st.file_uploader("2A. (選填) 上傳【2425 屆】校內模擬試/期末成績 (*Reg. No.)", type=["xls", "xlsx", "csv"], key="tr_s_2")
+    with col_b2: f_tr_dse_2 = st.file_uploader("2B. (選填) 上傳【2425 屆】2425HKDSE 公開試成績 (Registration No.)", type=["xls", "xlsx", "csv"], key="tr_d_2")
+
     # 處理第二套
     if f_tr_school_2 and f_tr_dse_2:
-        df2, err2 = process_training_pair(f_tr_school_2, f_tr_dse_2)
-        if err2: st.error(f"第二套數據：{err2}")
-        elif not df2.empty: train_dfs.append(df2)
+        df2, corr_df2, err2 = process_training_pair(f_tr_school_2, f_tr_dse_2)
+        if err2:
+            st.error(f"第二套數據：{err2}")
+        elif not df2.empty:
+            train_dfs.append(df2)
+            with st.expander("📈 檢視【第二套數據】各學科相關係數分析 (Correlation Analysis)", expanded=True):
+                st.dataframe(corr_df2, use_container_width=True, hide_index=True)
 
     if train_dfs and HAS_SKLEARN:
         try:
             df_train = pd.concat(train_dfs, ignore_index=True)
             feats = ['Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score']
+            
+            if len(train_dfs) > 1:
+                st.markdown("##### 📈 兩套數據合併後之總體學科相關係數：")
+                corr_combined = get_correlation_table(df_train)
+                st.dataframe(corr_combined, use_container_width=True, hide_index=True)
             
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
