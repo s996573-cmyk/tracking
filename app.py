@@ -30,6 +30,8 @@ def grade_to_level(g):
 # 健壯的核心科目成績自動提取函數
 def extract_robust_scores(df):
     df_out = df.copy()
+    
+    # 1. 提取總平均分
     tot_cols = [c for c in ['T2A3_Score', 'T1A3_Score', 'T2A1_Score', 'T1A1_Score', 'Score'] if c in df_out.columns]
     if not tot_cols:
         tot_cols = [c for c in df_out.columns if str(c).endswith('_Score') and not any(sub in str(c) for sub in ['生物', '化學', '中文', '英文', '數學', '數必', '公民', '企財', '經濟', '地理', '歷史', '中史', '物理', '資通', '視憑', '倫教', '體育', '學培課', '退修課'])]
@@ -37,24 +39,28 @@ def extract_robust_scores(df):
     
     avg_score = pd.to_numeric(df_out[tot_col], errors='coerce').round(1) if tot_col else pd.Series(np.nan, index=df_out.index)
 
+    # 2. 提取中文分數
     chi_cols = [c for c in df_out.columns if '中文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '寫作', '聆聽', '口試', '說話'])]
     chi_series = None
     for cc in chi_cols:
         s = pd.to_numeric(df_out[cc], errors='coerce')
         chi_series = s if chi_series is None else chi_series.fillna(s)
 
+    # 3. 提取英文分數
     eng_cols = [c for c in df_out.columns if '英文' in str(c) and 'Score' in str(c) and not any(k in str(c) for k in ['閱讀', '作文', '聆聽', '口試', '語文'])]
     eng_series = None
     for ec in eng_cols:
         s = pd.to_numeric(df_out[ec], errors='coerce')
         eng_series = s if eng_series is None else eng_series.fillna(s)
 
+    # 4. 提取數學必修分數
     math_cols = [c for c in df_out.columns if any(k in str(c) for k in ['數必', '數學']) and 'Score' in str(c) and not any(k in str(c) for k in ['數一', '數二', 'M1', 'M2'])]
     math_series = None
     for mc in math_cols:
         s = pd.to_numeric(df_out[mc], errors='coerce')
         math_series = s if math_series is None else math_series.fillna(s)
 
+    # 5. 提取公社科 (CS)
     cs_cols = [c for c in df_out.columns if any(k in str(c) for k in ['公民科', 'CS']) and any(k in str(c) for k in ['Score', 'Grade'])]
     cs_series = None
     for csc in cs_cols:
@@ -67,6 +73,45 @@ def extract_robust_scores(df):
     df_out['Math_Score'] = math_series.round(1) if math_series is not None else np.nan
     df_out['CS_Val'] = cs_series if cs_series is not None else 50
     return df_out
+
+# 從 AI 決策樹及歷史達標數據自動提取精準門檻
+def extract_ai_thresholds(clf, df_train, feats):
+    thresholds = {}
+    for i in range(clf.tree_.node_count):
+        f_idx = clf.tree_.feature[i]
+        if f_idx >= 0:
+            f_name = feats[f_idx]
+            t_val = round(float(clf.tree_.threshold[i]), 1)
+            if f_name not in thresholds or t_val < thresholds[f_name]:
+                thresholds[f_name] = t_val
+                
+    successful_df = df_train[df_train['Target_332'] == 1]
+    
+    mapping = {
+        'Avg_Score': 'u_score_input',
+        'Chi_Score': 'u_chi_input',
+        'Eng_Score': 'u_eng_input',
+        'Math_Score': 'u_math_input'
+    }
+    defaults = {
+        'Avg_Score': 55.0,
+        'Chi_Score': 52.0,
+        'Eng_Score': 55.0,
+        'Math_Score': 40.0
+    }
+    
+    final_thresh = {}
+    for f in feats:
+        key = mapping[f]
+        if f in thresholds:
+            final_thresh[key] = thresholds[f]
+        elif not successful_df.empty and f in successful_df.columns:
+            val = round(float(successful_df[f].quantile(0.10)), 1)
+            final_thresh[key] = val
+        else:
+            final_thresh[key] = defaults[f]
+            
+    return final_thresh
 
 # 載入學生中文姓名資料庫
 @st.cache_data
@@ -91,25 +136,35 @@ main_tab1, main_tab2, main_tab3 = st.tabs([
     "🔮 校內成績升學預測與四類名單"
 ])
 
-# 側邊欄：校方可手動或參照 AI 建議門檻
+# 初始化 session state 預設門檻
+if 'u_score_input' not in st.session_state: st.session_state['u_score_input'] = 55.0
+if 'u_chi_input' not in st.session_state: st.session_state['u_chi_input'] = 52.0
+if 'u_eng_input' not in st.session_state: st.session_state['u_eng_input'] = 55.0
+if 'u_math_input' not in st.session_state: st.session_state['u_math_input'] = 40.0
+if 'u_cs_input' not in st.session_state: st.session_state['u_cs_input'] = 40.0
+
+# 側邊欄門檻設定
 st.sidebar.header("⚙️ 大學門檻 (332A22) 校內分數設定")
-st.sidebar.info("💡 建議參照第 1 分頁 AI 自動訓練提煉之關鍵門檻線進行設定")
-u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", value=55.0)
-u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", value=52.0)
-u_eng_thresh = st.sidebar.number_input("大學：英文分數門檻", value=55.0)
-u_math_thresh = st.sidebar.number_input("大學：數學分數門檻", value=40.0)
-u_cs_thresh = st.sidebar.number_input("大學：公社科分數門檻", value=40.0)
+
+if st.session_state.get('ai_updated_flag', False):
+    st.sidebar.success("🤖 已根據 AI 訓練結果自動更新大學門檻！")
+
+u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", key="u_score_input")
+u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", key="u_chi_input")
+u_eng_thresh = st.sidebar.number_input("大學：英文分數門檻", key="u_eng_input")
+u_math_thresh = st.sidebar.number_input("大學：數學分數門檻", key="u_math_input")
+u_cs_thresh = st.sidebar.number_input("大學：公社科分數門檻", key="u_cs_input")
 
 st.sidebar.header("⚙️ 大專門檻 (222A22) 校內分數設定")
-sub_score_thresh = st.sidebar.number_input("大專：總平均分門檻", value=40.0)
-sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40.0)
-sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0)
-sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0)
+sub_score_thresh = st.sidebar.number_input("大專：總平均分門檻", value=40.0, key="sub_score_input")
+sub_chi_thresh = st.sidebar.number_input("大專：中文分數門檻", value=40.0, key="sub_chi_input")
+sub_eng_thresh = st.sidebar.number_input("大專：英文分數門檻", value=40.0, key="sub_eng_input")
+sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=40.0, key="sub_math_input")
 
 # ==================== 分頁一（最左）：AI 機器學習建模 ====================
 with main_tab1:
     st.subheader("🤖 跨學年 AI 數據建模與升學概率預測")
-    st.write("利用過往畢業生的「校內期末成績」與「2526HKDSE 實際成績」自動訓練 AI 模型，提煉出數據驅動的精準錄取分數線。")
+    st.write("利用過往畢業生的「校內期末成績」與「2526HKDSE 實際成績」自動訓練 AI 模型，提煉數據驅動的精準門檻，並自動同步至左側邊欄設定。")
     
     col_a, col_b = st.columns(2)
     with col_a: f_tr_school = st.file_uploader("1. 上傳【過往畢業生】校內期末/模擬試成績 (Excel)", type=["xls", "xlsx"], key="tr_s")
@@ -137,12 +192,26 @@ with main_tab1:
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
             
-            st.success(f"🎉 AI 模型訓練成功！歷史訓練樣本數：{len(df_train)} 人。")
+            # 提煉 AI 最佳切分門檻
+            ai_thresh = extract_ai_thresholds(clf, df_train, feats)
+            
+            # 檢查是否需要更新左側邊欄
+            need_rerun = False
+            for k, val in ai_thresh.items():
+                if round(st.session_state.get(k, 0.0), 1) != round(val, 1):
+                    st.session_state[k] = val
+                    need_rerun = True
+
+            if need_rerun or not st.session_state.get('ai_updated_flag', False):
+                st.session_state['ai_updated_flag'] = True
+                st.rerun()
+
+            st.success(f"🎉 AI 模型訓練成功！已自動將最優切分線同步至左側大學門檻設定。（歷史樣本數：{len(df_train)} 人）")
             
             col_tree1, col_tree2 = st.columns([1, 1])
             with col_tree1:
-                st.markdown("##### 📊 各科目對升大學 (332) 的預測權重：")
-                imp_df = pd.DataFrame({'校內指標': feats, 'AI 預測影響權重': clf.feature_importances_}).sort_values('AI 預測影響權重', ascending=False)
+                st.markdown("##### 📊 各科目對升大學 (332) 的預測影響權重：")
+                imp_df = pd.DataFrame({'校內指標': feats, 'AI 預測權重': clf.feature_importances_}).sort_values('AI 預測權重', ascending=False)
                 st.dataframe(imp_df, use_container_width=True, hide_index=True)
                 
             with col_tree2:
