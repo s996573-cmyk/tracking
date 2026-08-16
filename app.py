@@ -27,30 +27,30 @@ def grade_to_level(g):
     try: return float(g_str)
     except: return np.nan
 
-# 健壯的核心科目成績自動提取函數 (解決 None 問題)
+# 健壯的核心科目成績自動提取函數
 def extract_robust_scores(df):
-    # 1. 提取總平均分 (Total Score)
+    # 1. 提取總平均分
     tot_cols = [c for c in ['T2A3_Score', 'T1A3_Score', 'T2A1_Score', 'T1A1_Score', 'Score'] if c in df.columns]
     if not tot_cols:
         tot_cols = [c for c in df.columns if c.endswith('_Score') and not any(sub in c for sub in ['生物', '化學', '中文', '英文', '數學', '數必', '公民', '企財', '經濟', '地理', '歷史', '中史', '物理', '資通', '視憑', '倫教', '體育', '學培課', '退修課'])]
     tot_col = tot_cols[0] if tot_cols else None
     avg_score = pd.to_numeric(df[tot_col], errors='coerce').round(1) if tot_col else np.nan
 
-    # 2. 提取中文分數 (自動合併中英文試卷)
+    # 2. 提取中文分數
     chi_cols = [c for c in df.columns if '中文' in c and 'Score' in c and not any(k in c for k in ['閱讀', '寫作', '聆聽', '口試', '說話'])]
     chi_series = None
     for cc in chi_cols:
         s = pd.to_numeric(df[cc], errors='coerce')
         chi_series = s if chi_series is None else chi_series.fillna(s)
 
-    # 3. 提取英文分數 (自動合併試卷)
+    # 3. 提取英文分數
     eng_cols = [c for c in df.columns if '英文' in c and 'Score' in c and not any(k in c for k in ['閱讀', '作文', '聆聽', '口試', '語文'])]
     eng_series = None
     for ec in eng_cols:
         s = pd.to_numeric(df[ec], errors='coerce')
         eng_series = s if eng_series is None else eng_series.fillna(s)
 
-    # 4. 提取數學必修分數 (精準合併 _C_Score 與 _E_Score)
+    # 4. 提取數學必修分數
     math_cols = [c for c in df.columns if any(k in c for k in ['數必', '數學']) and 'Score' in c and not any(k in c for k in ['數一', '數二', 'M1', 'M2'])]
     math_series = None
     for mc in math_cols:
@@ -91,7 +91,7 @@ st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📚 近兩年學期成績分析 (T1A3/T2A3)", 
     "🎓 2526HKDSE 成效與門檻對照 (332A22 / 222A22)", 
-    "🔮 中五/中六升學潛質預測與三類名單",
+    "🔮 中五/中六升學潛質預測與四類名單",
     "🤖 跨學年 AI 數據建模與預測"
 ])
 
@@ -175,9 +175,9 @@ with main_tab2:
             st.dataframe(df_dse[disp_dse], use_container_width=True, hide_index=True)
         except Exception as e: st.error(f"DSE 檔案讀取失敗: {e}")
 
-# ==================== 分頁三：升學潛質名單產出 (已修正 None 問題) ====================
+# ==================== 分頁三：升學潛質名單產出 (包含特別支援名單) ====================
 with main_tab3:
-    st.subheader("🔮 校內成績預測：產生「潛質入大學」、「潛質入大專」及「保底求合格」名單")
+    st.subheader("🔮 校內成績預測：產生「大學」、「特別支援（差一科）」、「大專」及「保底」名單")
     f_eval = st.file_uploader("上傳校內成績表 (Excel)", type=["xls", "xlsx"], key="eval_up")
     
     if f_eval:
@@ -187,7 +187,6 @@ with main_tab3:
                 df_ev['Reg_Clean'] = df_ev['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
                 df_ev = pd.merge(df_ev, student_info_df, left_on='Reg_Clean', right_on='註冊編號_clean', how='left')
             
-            # 使用健壯函數提取成績
             df_ev = extract_robust_scores(df_ev)
             
             def cs_is_attained(cs_val):
@@ -201,35 +200,59 @@ with main_tab3:
                 s, c, e, m, cs = row['Avg_Score'], row['Chi_Score'], row['Eng_Score'], row['Math_Score'], row['CS_Val']
                 cs_ok = cs_is_attained(cs)
                 
-                if pd.notna(s) and pd.notna(c) and pd.notna(e) and pd.notna(m):
-                    if s >= u_score_thresh and c >= u_chi_thresh and e >= u_eng_thresh and m >= u_math_thresh and cs_ok:
-                        return "🎓 潛質入大學名單 (332A22)"
-                    elif s >= sub_score_thresh and c >= sub_chi_thresh and e >= sub_eng_thresh and m >= sub_math_thresh and cs_ok:
-                        return "🏫 潛質入大專名單 (222A22)"
-                return "🛟 保底求合格名單 (關鍵科需支援)"
+                cond_u = [
+                    pd.notna(s) and s >= u_score_thresh,
+                    pd.notna(c) and c >= u_chi_thresh,
+                    pd.notna(e) and e >= u_eng_thresh,
+                    pd.notna(m) and m >= u_math_thresh,
+                    cs_ok
+                ]
+                cond_names = ['總平均分', '中文', '英文', '數學', '公社科']
+                failed_conds = [cond_names[i] for i, passed in enumerate(cond_u) if not passed]
+                
+                # 1. 全部達標 -> 潛質入大學
+                if all(cond_u):
+                    return pd.Series(["🎓 潛質入大學名單 (332A22)", "全科達標"])
+                # 2. 差 1 科達標 -> 特別支援名單
+                elif len(failed_conds) == 1:
+                    return pd.Series(["🎯 特別支援名單 (差一科入大學)", f"僅未達標：{failed_conds[0]}"])
+                # 3. 達大專門檻 -> 潛質入大專
+                elif pd.notna(s) and pd.notna(c) and pd.notna(e) and pd.notna(m) and s >= sub_score_thresh and c >= sub_chi_thresh and e >= sub_eng_thresh and m >= sub_math_thresh and cs_ok:
+                    return pd.Series(["🏫 潛質入大專名單 (222A22)", "達大專要求"])
+                # 4. 保底求合格
+                else:
+                    return pd.Series(["🛟 保底求合格名單 (關鍵科需支援)", f"未達標科目：{', '.join(failed_conds)}"])
             
-            df_ev['升學類別'] = df_ev.apply(categorize_student, axis=1)
+            df_ev[['升學類別', '診斷與提示']] = df_ev.apply(categorize_student, axis=1)
             counts = df_ev['升學類別'].value_counts()
             
-            c1, c2, c3 = st.columns(3)
-            with c1: st.metric("🎓 潛質入大學 (332A22)", f"{counts.get('🎓 潛質入大學名單 (332A22)', 0)} 人")
-            with c2: st.metric("🏫 潛質入大專 (222A22)", f"{counts.get('🏫 潛質入大專名單 (222A22)', 0)} 人")
-            with c3: st.metric("🛟 保底求合格名單", f"{counts.get('🛟 保底求合格名單 (關鍵科需支援)', 0)} 人")
+            m1, m2, m3, m4 = st.columns(4)
+            with m1: st.metric("🎓 潛質入大學 (332A22)", f"{counts.get('🎓 潛質入大學名單 (332A22)', 0)} 人")
+            with m2: st.metric("🎯 特別支援 (差一科)", f"{counts.get('🎯 特別支援名單 (差一科入大學)', 0)} 人")
+            with m3: st.metric("🏫 潛質入大專 (222A22)", f"{counts.get('🏫 潛質入大專名單 (222A22)', 0)} 人")
+            with m4: st.metric("🛟 保底求合格名單", f"{counts.get('🛟 保底求合格名單 (關鍵科需支援)', 0)} 人")
             
             st.divider()
             
-            tab_u, tab_sub, tab_base = st.tabs(["🎓 潛質入大學名單", "🏫 潛質入大專名單", "🛟 保底求合格名單"])
+            tab_u, tab_sp, tab_sub, tab_base = st.tabs([
+                "🎓 潛質入大學名單", 
+                "🎯 特別支援名單 (差一科)", 
+                "🏫 潛質入大專名單", 
+                "🛟 保底求合格名單"
+            ])
             
             disp_ev = ['*Class', '*Class Number']
             if '中文姓名' in df_ev.columns: disp_ev.append('中文姓名')
-            disp_ev.extend(['*Student Name', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score', '升學類別'])
+            disp_ev.extend(['*Student Name', 'Avg_Score', 'Chi_Score', 'Eng_Score', 'Math_Score', '升學類別', '診斷與提示'])
             
             with tab_u:
-                st.dataframe(df_ev[df_ev['升學類別'].str.contains("大學")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
+                st.dataframe(df_ev[df_ev['升學類別'].str.contains("大學名單")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
+            with tab_sp:
+                st.dataframe(df_ev[df_ev['升學類別'].str.contains("特別支援")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
             with tab_sub:
-                st.dataframe(df_ev[df_ev['升學類別'].str.contains("大專")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
+                st.dataframe(df_ev[df_ev['升學類別'].str.contains("大專名單")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
             with tab_base:
-                st.dataframe(df_ev[df_ev['升學類別'].str.contains("保底")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
+                st.dataframe(df_ev[df_ev['升學類別'].str.contains("保底求合格")][disp_ev].sort_values(['*Class', '*Class Number']), use_container_width=True, hide_index=True)
 
         except Exception as e: st.error(f"分析失敗: {e}")
 
@@ -246,9 +269,9 @@ with main_tab4:
             d_dse = pd.read_excel(f_tr_dse)
             
             d_sch['Reg_Clean'] = d_sch['*Reg. No.'].astype(str).str.replace('#', '').str.strip()
-            d_dse['Reg_Clean'] = d_dse['Registration No.'].astype(str).str.strip()
+            d_dse['Registration No.'] = d_dse['Registration No.'].astype(str).str.strip()
             
-            m_ai = pd.merge(d_sch, d_dse, on='Reg_Clean')
+            m_ai = pd.merge(d_sch, d_dse, left_on='Reg_Clean', right_on='Registration No.')
             m_ai = extract_robust_scores(m_ai)
             
             m_ai['DSE_Chi'] = m_ai['A010 Chinese'].apply(grade_to_level)
