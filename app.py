@@ -379,6 +379,17 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
     comp_df = m_ai[m_ai['Target_222'] == 1].copy()
     comp_df['學年'] = dataset_label
     
+    # 自動匹配與對照所有選修科目（校內分數 + DSE 等級）
+    for sub in SUBJECT_MAP[3:]: # 選修科目
+        sub_name = sub['name']
+        sch_s = get_school_subject_score(comp_df, sub['sch_keys'], sub['sch_ex'])
+        dse_c = find_col(comp_df.columns, sub['dse_keys'], sub['dse_ex'])
+        
+        if sch_s is not None and sch_s.notna().sum() > 0:
+            comp_df[f'校內{sub_name}'] = sch_s.round(1)
+        if dse_c is not None and comp_df[dse_c].notna().sum() > 0:
+            comp_df[f'DSE {sub_name}'] = comp_df[dse_c]
+
     cols_mapping = {
         '學年': '學年',
         '*Class': '班別', 'Class': '班別',
@@ -397,7 +408,10 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
     }
     
     display_cols = []
-    for c in ['學年', '班別', '班號', '中文姓名', '英文姓名', '校內總平均分', '校內中文分數', '校內英文分數', '校內數學分數', '校內公社科分數', 'DSE 中文等級', 'DSE 英文等級', 'DSE 數學等級', '達標類別']:
+    # 基礎欄位定義
+    base_order = ['學年', '班別', '班號', '中文姓名', '英文姓名', '校內總平均分', '校內中文分數', '校內英文分數', '校內數學分數', '校內公社科分數', 'DSE 中文等級', 'DSE 英文等級', 'DSE 數學等級']
+    
+    for c in base_order:
         found = None
         for orig, mapped in cols_mapping.items():
             if mapped == c and orig in comp_df.columns:
@@ -408,6 +422,20 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
             if c not in display_cols:
                 display_cols.append(c)
                 
+    # 動態添加已出現的選修科對照欄位（校內分數與 DSE 等級）
+    for sub in SUBJECT_MAP[3:]:
+        sub_name = sub['name']
+        sch_col_name = f'校內{sub_name}'
+        dse_col_name = f'DSE {sub_name}'
+        if sch_col_name in comp_df.columns:
+            display_cols.append(sch_col_name)
+        if dse_col_name in comp_df.columns:
+            display_cols.append(dse_col_name)
+
+    # 確保達標類別放在最後
+    if '達標類別' in comp_df.columns and '達標類別' not in display_cols:
+        display_cols.append('達標類別')
+
     res_comp_df = comp_df[display_cols]
     
     return clean_df, df_all_corr, res_comp_df, None
@@ -608,13 +636,27 @@ with main_tab1:
             st.dataframe(pd.DataFrame(avg_rows), use_container_width=True, hide_index=True)
 
         st.markdown("##### 📋 達標學生『公開試等級 vs 校內成績』明細表")
-        filter_tier = st.radio("篩選達標類別：", ["全部達標學生", "🎓 僅大學門檻 (332)", "🏫 僅大專門檻 (222)"], horizontal=True, key="filter_tier_radio")
         
+        # 雙條件篩選列：1. 達標類別  2. 學年
+        col_f1, col_f2 = st.columns([1, 1])
+        with col_f1:
+            filter_tier = st.radio("篩選達標類別：", ["全部達標學生", "🎓 僅大學門檻 (332)", "🏫 僅大專門檻 (222)"], horizontal=True, key="filter_tier_radio")
+        
+        with col_f2:
+            available_years = ["全部學年"] + sorted(list(df_all_comp['學年'].astype(str).unique()), reverse=True)
+            filter_year = st.selectbox("篩選學年：", available_years, key="filter_year_select")
+
         df_disp_filtered = df_all_comp.copy()
+        
+        # 依類別篩選
         if filter_tier == "🎓 僅大學門檻 (332)":
             df_disp_filtered = df_disp_filtered[df_disp_filtered['達標類別'].str.contains("332")]
         elif filter_tier == "🏫 僅大專門檻 (222)":
             df_disp_filtered = df_disp_filtered[df_disp_filtered['達標類別'].str.contains("222")]
+            
+        # 依學年篩選
+        if filter_year != "全部學年":
+            df_disp_filtered = df_disp_filtered[df_disp_filtered['學年'].astype(str) == filter_year]
             
         st.dataframe(df_disp_filtered, use_container_width=True, hide_index=True)
 
