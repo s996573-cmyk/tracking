@@ -14,6 +14,16 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
+# 安全數值求平均函數（自動剔除文字標籤如 Pass/Attained，防止 TypeError）
+def safe_mean(series):
+    if series is None or len(series) == 0:
+        return np.nan
+    s_num = pd.to_numeric(series, errors='coerce')
+    if s_num.dropna().empty:
+        return np.nan
+    val = s_num.mean()
+    return round(float(val), 1) if not pd.isna(val) else np.nan
+
 # 安全讀取 CSV 與 Excel (支援檔案路徑字串及 UploadedFile 物件)
 def safe_read_file(file_input):
     if isinstance(file_input, str):
@@ -582,7 +592,7 @@ with main_tab1:
 
         except Exception as e: st.error(f"建模失敗: {e}")
 
-    # ===== 新增：達大學 (332) 或大專 (222) 門檻之『公開試 vs 校內成績』對照表與平均分統計 =====
+    # ===== 達大學 (332) 或大專 (222) 門檻之『公開試 vs 校內成績』對照表與平均分統計 =====
     if comp_dfs:
         st.divider()
         st.subheader("📊 達大學 (332) 或大專 (222) 收生門檻之『公開試成績 vs 校內成績』對照表與平均分總覽")
@@ -593,11 +603,14 @@ with main_tab1:
         u_group = df_all_comp[df_all_comp['達標類別'].str.contains("332")]
         sub_group = df_all_comp[df_all_comp['達標類別'].str.contains("222")]
         
+        u_avg_val = safe_mean(u_group['校內總平均分']) if '校內總平均分' in u_group else np.nan
+        sub_avg_val = safe_mean(sub_group['校內總平均分']) if '校內總平均分' in sub_group else np.nan
+        
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("🎓 達大學門檻 (332) 總人數", f"{len(u_group)} 人")
-        with c2: st.metric("🎓 達大學門檻學生【校內總平均分】", f"{u_group['校內總平均分'].mean():.1f} 分" if not u_group.empty else "N/A")
+        with c2: st.metric("🎓 達大學門檻學生【校內總平均分】", f"{u_avg_val:.1f} 分" if not pd.isna(u_avg_val) else "N/A")
         with c3: st.metric("🏫 達大專門檻 (222) 總人數", f"{len(sub_group)} 人")
-        with c4: st.metric("🏫 達大專門檻學生【校內總平均分】", f"{sub_group['校內總平均分'].mean():.1f} 分" if not sub_group.empty else "N/A")
+        with c4: st.metric("🏫 達大專門檻學生【校內總平均分】", f"{sub_avg_val:.1f} 分" if not pd.isna(sub_avg_val) else "N/A")
 
         # 平均分彙整表
         avg_rows = []
@@ -605,21 +618,21 @@ with main_tab1:
             avg_rows.append({
                 '門檻類別': '🎓 大學收生門檻 (332A22)',
                 '人數': len(u_group),
-                '校內總平均分': round(u_group['校內總平均分'].mean(), 1) if '校內總平均分' in u_group else np.nan,
-                '校內中文均分': round(u_group['校內中文分數'].mean(), 1) if '校內中文分數' in u_group else np.nan,
-                '校內英文均分': round(u_group['校內英文分數'].mean(), 1) if '校內英文分數' in u_group else np.nan,
-                '校內數學均分': round(u_group['校內數學分數'].mean(), 1) if '校內數學分數' in u_group else np.nan,
-                '校內公社科均分': round(u_group['校內公社科分數'].mean(), 1) if '校內公社科分數' in u_group else np.nan
+                '校內總平均分': safe_mean(u_group.get('校內總平均分')),
+                '校內中文均分': safe_mean(u_group.get('校內中文分數')),
+                '校內英文均分': safe_mean(u_group.get('校內英文分數')),
+                '校內數學均分': safe_mean(u_group.get('校內數學分數')),
+                '校內公社科均分': safe_mean(u_group.get('校內公社科分數'))
             })
         if not sub_group.empty:
             avg_rows.append({
                 '門檻類別': '🏫 大專收生門檻 (222A22)',
                 '人數': len(sub_group),
-                '校內總平均分': round(sub_group['校內總平均分'].mean(), 1) if '校內總平均分' in sub_group else np.nan,
-                '校內中文均分': round(sub_group['校內中文分數'].mean(), 1) if '校內中文分數' in sub_group else np.nan,
-                '校內英文均分': round(sub_group['校內英文分數'].mean(), 1) if '校內英文分數' in sub_group else np.nan,
-                '校內數學均分': round(sub_group['校內數學分數'].mean(), 1) if '校內數學分數' in sub_group else np.nan,
-                '校內公社科均分': round(sub_group['校內公社科分數'].mean(), 1) if '校內公社科分數' in sub_group else np.nan
+                '校內總平均分': safe_mean(sub_group.get('校內總平均分')),
+                '校內中文均分': safe_mean(sub_group.get('校內中文分數')),
+                '校內英文均分': safe_mean(sub_group.get('校內英文分數')),
+                '校內數學均分': safe_mean(sub_group.get('校內數學分數')),
+                '校內公社科均分': safe_mean(sub_group.get('校內公社科分數'))
             })
             
         if avg_rows:
