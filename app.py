@@ -74,15 +74,18 @@ def extract_robust_scores(df):
     df_out['CS_Val'] = cs_series if cs_series is not None else 50
     return df_out
 
-# 從 AI 決策樹及歷史達標數據自動提取精準門檻
+# 優先提取決策樹「最頂層主幹（根節點）」切分門檻
 def extract_ai_thresholds(clf, df_train, feats):
     thresholds = {}
+    
+    # 由上至下遍歷決策樹，只抓取每個科目「第一個出現（權重最高）」的主幹切分點
     for i in range(clf.tree_.node_count):
         f_idx = clf.tree_.feature[i]
         if f_idx >= 0:
             f_name = feats[f_idx]
-            t_val = round(float(clf.tree_.threshold[i]), 1)
-            if f_name not in thresholds or t_val < thresholds[f_name]:
+            t_val = round(float(clf.tree_.threshold[i]), 2)
+            # 若該科目尚未記錄，存入第一個（即最高層）切分點
+            if f_name not in thresholds:
                 thresholds[f_name] = t_val
                 
     successful_df = df_train[df_train['Target_332'] == 1]
@@ -99,7 +102,7 @@ def extract_ai_thresholds(clf, df_train, feats):
         if f in thresholds:
             final_thresh[f] = thresholds[f]
         elif not successful_df.empty and f in successful_df.columns:
-            val = round(float(successful_df[f].quantile(0.10)), 1)
+            val = round(float(successful_df[f].quantile(0.10)), 2)
             final_thresh[f] = val
         else:
             final_thresh[f] = defaults[f]
@@ -140,7 +143,7 @@ if 'u_cs_val' not in st.session_state: st.session_state['u_cs_val'] = 40.0
 st.sidebar.header("⚙️ 大學門檻 (332A22) 校內分數設定")
 
 if st.session_state.get('ai_updated_flag', False):
-    st.sidebar.success("🤖 已根據 AI 訓練結果自動更新大學門檻！")
+    st.sidebar.success("🤖 已根據 AI 訓練結果自動更新大學主幹門檻！")
 
 u_score_thresh = st.sidebar.number_input("大學：總平均分門檻", value=st.session_state['u_score_val'])
 u_chi_thresh = st.sidebar.number_input("大學：中文分數門檻", value=st.session_state['u_chi_val'])
@@ -185,7 +188,7 @@ with main_tab1:
             clf = DecisionTreeClassifier(max_depth=3, random_state=42)
             clf.fit(df_train[feats], df_train['Target_332'])
             
-            # 提煉 AI 最佳切分門檻
+            # 提煉 AI 最佳切分門檻 (優先取主幹)
             ai_thresh = extract_ai_thresholds(clf, df_train, feats)
             
             mapping = {
@@ -198,7 +201,7 @@ with main_tab1:
             need_rerun = False
             for feat_name, state_key in mapping.items():
                 new_val = ai_thresh.get(feat_name, st.session_state[state_key])
-                if round(st.session_state[state_key], 1) != round(new_val, 1):
+                if round(st.session_state[state_key], 2) != round(new_val, 2):
                     st.session_state[state_key] = new_val
                     need_rerun = True
 
@@ -206,7 +209,7 @@ with main_tab1:
                 st.session_state['ai_updated_flag'] = True
                 st.rerun()
 
-            st.success(f"🎉 AI 模型訓練成功！已自動將最優切分線同步至左側大學門檻設定。（歷史樣本數：{len(df_train)} 人）")
+            st.success(f"🎉 AI 模型訓練成功！已自動將主幹最優切分線同步至左側大學門檻設定。（歷史樣本數：{len(df_train)} 人）")
             
             col_tree1, col_tree2 = st.columns([1, 1])
             with col_tree1:
