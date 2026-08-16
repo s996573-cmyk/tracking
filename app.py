@@ -278,14 +278,16 @@ def extract_robust_scores(df):
     cs_cols = [c for c in df_out.columns if any(k in str(c) for k in ['公民科', 'CS']) and any(k in str(c) for k in ['Score', 'Grade'])]
     cs_series = None
     for csc in cs_cols:
-        s = df_out[csc]
+        s = pd.to_numeric(df_out[csc], errors='coerce')
+        if s.notna().sum() == 0:
+            s = df_out[csc]
         cs_series = s if cs_series is None else cs_series.fillna(s)
 
     df_out['Avg_Score'] = avg_score
     df_out['Chi_Score'] = chi_series.round(1) if chi_series is not None else np.nan
     df_out['Eng_Score'] = eng_series.round(1) if eng_series is not None else np.nan
     df_out['Math_Score'] = math_series.round(1) if math_series is not None else np.nan
-    df_out['CS_Val'] = cs_series if cs_series is not None else 50
+    df_out['CS_Val'] = cs_series if cs_series is not None else np.nan
     return df_out
 
 # 通用過往畢業生數據對照與清洗處理
@@ -585,26 +587,28 @@ with main_tab3:
                     df_ev[col_name] = s.round(1)
                     elective_cols_added.append(col_name)
 
-            # 公社科/公民科達標格式化轉換器 (合格顯示 A, 未合格顯示 U)
-            def parse_cs_display(cs_val, thresh=40.0):
-                if pd.isna(cs_val) or str(cs_val).strip() == '':
-                    return 'U'
+            # 公社科/公民科達標判斷函數 (保留數值分數顯示)
+            def cs_is_attained(cs_val):
+                if pd.isna(cs_val): return False
                 val_str = str(cs_val).strip().upper()
-                if val_str in ['A', 'PASS', 'ATTAINED', '達標', 'D', 'C', 'B', 'E']:
-                    return 'A'
-                if val_str in ['U', 'UNATTAINED', '不達標', 'FAIL', 'F']:
-                    return 'U'
-                try:
-                    score = float(val_str)
-                    return 'A' if score >= thresh else 'U'
-                except:
-                    return 'U'
+                if val_str in ['A', 'PASS', 'ATTAINED', '達標', 'D', 'C', 'B', 'E']: return True
+                if val_str in ['U', 'UNATTAINED', '不達標', 'FAIL', 'F']: return False
+                try: return float(val_str) >= u_cs_thresh
+                except: return False
 
-            df_ev['公民與社會發展科'] = df_ev['CS_Val'].apply(lambda x: parse_cs_display(x, u_cs_thresh))
+            # 將公社科分數格式化為數值（若為數值則保留，非數值顯示原標籤/分數）
+            def format_cs_score(cs_val):
+                if pd.isna(cs_val): return np.nan
+                try:
+                    return round(float(cs_val), 1)
+                except:
+                    return str(cs_val)
+
+            df_ev['公民與社會發展科'] = df_ev['CS_Val'].apply(format_cs_score)
 
             def categorize_student(row):
-                s, c, e, m = row['Avg_Score'], row['Chi_Score'], row['Eng_Score'], row['Math_Score']
-                cs_ok = (row['公民與社會發展科'] == 'A')
+                s, c, e, m, cs_raw = row['Avg_Score'], row['Chi_Score'], row['Eng_Score'], row['Math_Score'], row['CS_Val']
+                cs_ok = cs_is_attained(cs_raw)
                 
                 cond_u = [
                     pd.notna(s) and s >= u_score_thresh,
@@ -658,7 +662,7 @@ with main_tab3:
             if '中文姓名' in df_ev.columns: disp_ev.append('中文姓名')
             if '*Student Name' in df_ev.columns: disp_ev.append('*Student Name')
             
-            # 依序放入核心科（含公社科 A/U）與所有選修科分數
+            # 依序放入核心科（含公民與社會發展科分數）與所有選修科分數
             disp_ev.extend(['總平均分', '中文科', '英文科', '數學必修', '公民與社會發展科'])
             disp_ev.extend(elective_cols_added)
             disp_ev.extend(['升學類別', '診斷與提示'])
