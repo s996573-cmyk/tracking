@@ -14,23 +14,46 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
-# 安全讀取 CSV 與 Excel (自動檢測 Big5 / UTF-8 / GB18030 編碼)
-def safe_read_file(file_obj):
-    filename = getattr(file_obj, 'name', '').lower()
-    if filename.endswith('.csv'):
-        encodings = ['utf-8-sig', 'big5-hkscs', 'big5', 'cp950', 'gb18030', 'gbk', 'utf-8']
-        for enc in encodings:
-            try:
-                if hasattr(file_obj, 'seek'): file_obj.seek(0)
-                df = pd.read_csv(file_obj, encoding=enc)
-                if not df.empty: return df
-            except Exception:
-                continue
-        if hasattr(file_obj, 'seek'): file_obj.seek(0)
-        return pd.read_csv(file_obj, encoding_errors='ignore')
+# 安全讀取 CSV 與 Excel (支援檔案路徑字串及 UploadedFile 物件)
+def safe_read_file(file_input):
+    if isinstance(file_input, str):
+        filename = file_input.lower()
+        if filename.endswith('.csv'):
+            encodings = ['utf-8-sig', 'big5-hkscs', 'big5', 'cp950', 'gb18030', 'gbk', 'utf-8']
+            for enc in encodings:
+                try:
+                    df = pd.read_csv(file_input, encoding=enc)
+                    if not df.empty: return df
+                except Exception:
+                    continue
+            return pd.read_csv(file_input, encoding_errors='ignore')
+        else:
+            return pd.read_excel(file_input)
     else:
-        if hasattr(file_obj, 'seek'): file_obj.seek(0)
-        return pd.read_excel(file_obj)
+        filename = getattr(file_input, 'name', '').lower()
+        if filename.endswith('.csv'):
+            encodings = ['utf-8-sig', 'big5-hkscs', 'big5', 'cp950', 'gb18030', 'gbk', 'utf-8']
+            for enc in encodings:
+                try:
+                    if hasattr(file_input, 'seek'): file_input.seek(0)
+                    df = pd.read_csv(file_input, encoding=enc)
+                    if not df.empty: return df
+                except Exception:
+                    continue
+            if hasattr(file_input, 'seek'): file_input.seek(0)
+            return pd.read_csv(file_input, encoding_errors='ignore')
+        else:
+            if hasattr(file_input, 'seek'): file_input.seek(0)
+            return pd.read_excel(file_input)
+
+# 自動尋找預設系統檔案或使用手動上載檔案
+def resolve_file_source(uploaded_file, candidate_filenames):
+    if uploaded_file is not None:
+        return uploaded_file, f"📤 已選用上載檔案：`{uploaded_file.name}`"
+    for fn in candidate_filenames:
+        if os.path.exists(fn):
+            return fn, f"📁 已自動匯入系統檔案：`{fn}`"
+    return None, "⚠️ 找不到預設檔案，請手動上載。"
 
 # 標準學號清理函數：專門處理 *Reg. No. 與 Registration No.
 def clean_id(v):
@@ -413,13 +436,22 @@ sub_math_thresh = st.sidebar.number_input("大專：數學分數門檻", value=4
 # ==================== 分頁一（最左）：AI 機器學習建模 ====================
 with main_tab1:
     st.subheader("🤖 跨學年 AI 數據建模與門檻自動提煉")
-    st.write("支援上傳多個學年的畢業生數據（Excel 或 CSV），透過精準對照校內 `*Reg. No.` 與 DSE `Registration No.` 建立預測模型，提煉代表性門檻。")
+    st.info("系統會優先自動偵測專案目錄中的數據檔案（如 `2526_T1A3_s6.xlsx`, `2526hkdse.xlsx`, `2425_T1A3_s6.xlsx`, `2425hkdse.xlsx`）。若未找到，亦可透過下方按鈕手動上載。")
     
     st.markdown("##### 📁 第一套歷史數據 (例如 2526 屆畢業生)")
     col_a1, col_b1 = st.columns(2)
-    with col_a1: f_tr_school_1 = st.file_uploader("1A. 上傳【2526 屆】校內模擬試/期末成績 (*Reg. No.)", type=["xls", "xlsx", "csv"], key="tr_s_1")
-    with col_b1: f_tr_dse_1 = st.file_uploader("1B. 上傳【2526 屆】2526HKDSE 公開試成績 (Registration No.)", type=["xls", "xlsx", "csv"], key="tr_d_1")
-    
+    with col_a1: 
+        f_tr_school_1_up = st.file_uploader("1A. 上傳/替換【2526 屆】校內模擬試成績", type=["xls", "xlsx", "csv"], key="tr_s_1")
+        f_tr_school_1, msg_s1 = resolve_file_source(f_tr_school_1_up, ['2526_T1A3_s6.xlsx', '2526_T1A3_s6.csv'])
+        if f_tr_school_1: st.caption(msg_s1)
+        else: st.caption("⚠️ 未找到 2526 屆校內成績預設檔，請手動上載。")
+
+    with col_b1: 
+        f_tr_dse_1_up = st.file_uploader("1B. 上傳/替換【2526 屆】2526HKDSE 公開試成績", type=["xls", "xlsx", "csv"], key="tr_d_1")
+        f_tr_dse_1, msg_d1 = resolve_file_source(f_tr_dse_1_up, ['2526hkdse.xlsx', '2526hkdse.csv'])
+        if f_tr_dse_1: st.caption(msg_d1)
+        else: st.caption("⚠️ 未找到 2526HKDSE 預設檔，請手動上載。")
+
     train_dfs = []
     
     # 處理第一套
@@ -429,13 +461,22 @@ with main_tab1:
             st.error(f"第一套數據：{err1}")
         elif not df1.empty:
             train_dfs.append(df1)
-            with st.expander("📈 檢視【第一套數據】全學科試卷關聯度與效度分析 (All-Subject Correlation Analysis)", expanded=True):
+            with st.expander("📈 檢視【第一套數據 (2526 屆)】全學科試卷關聯度與效度分析", expanded=True):
                 st.dataframe(corr_df1, use_container_width=True, hide_index=True)
             
-    st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 選填，增加樣本量與精準度)")
+    st.markdown("##### 📁 第二套歷史數據 (例如 2425 屆畢業生 - 增加樣本量與精準度)")
     col_a2, col_b2 = st.columns(2)
-    with col_a2: f_tr_school_2 = st.file_uploader("2A. (選填) 上傳【2425 屆】校內模擬試/期末成績 (*Reg. No.)", type=["xls", "xlsx", "csv"], key="tr_s_2")
-    with col_b2: f_tr_dse_2 = st.file_uploader("2B. (選填) 上傳【2425 屆】2425HKDSE 公開試成績 (Registration No.)", type=["xls", "xlsx", "csv"], key="tr_d_2")
+    with col_a2: 
+        f_tr_school_2_up = st.file_uploader("2A. (選填) 上傳/替換【2425 屆】校內模擬試成績", type=["xls", "xlsx", "csv"], key="tr_s_2")
+        f_tr_school_2, msg_s2 = resolve_file_source(f_tr_school_2_up, ['2425_T1A3_s6.xlsx', '2425_T1A3_s6.csv'])
+        if f_tr_school_2: st.caption(msg_s2)
+        else: st.caption("⚠️ 未找到 2425 屆校內成績預設檔，可選擇手動上載。")
+
+    with col_b2: 
+        f_tr_dse_2_up = st.file_uploader("2B. (選填) 上傳/替換【2425 屆】2425HKDSE 公開試成績", type=["xls", "xlsx", "csv"], key="tr_d_2")
+        f_tr_dse_2, msg_d2 = resolve_file_source(f_tr_dse_2_up, ['2425hkdse.xlsx', '2425hkdse.csv'])
+        if f_tr_dse_2: st.caption(msg_d2)
+        else: st.caption("⚠️ 未找到 2425HKDSE 預設檔，可選擇手動上載。")
 
     # 處理第二套
     if f_tr_school_2 and f_tr_dse_2:
@@ -444,7 +485,7 @@ with main_tab1:
             st.error(f"第二套數據：{err2}")
         elif not df2.empty:
             train_dfs.append(df2)
-            with st.expander("📈 檢視【第二套數據】全學科試卷關聯度與效度分析 (All-Subject Correlation Analysis)", expanded=True):
+            with st.expander("📈 檢視【第二套數據 (2425 屆)】全學科試卷關聯度與效度分析", expanded=True):
                 st.dataframe(corr_df2, use_container_width=True, hide_index=True)
 
     if train_dfs and HAS_SKLEARN:
@@ -495,8 +536,15 @@ with main_tab1:
 with main_tab2:
     st.subheader("🎓 2526HKDSE 公開試實際表現與 332A22 / 222A22 門檻對照（含中六 T2A3 對照）")
     col_d1, col_d2 = st.columns(2)
-    with col_d1: f_dse = st.file_uploader("1. 上傳 2526hkdse 成績表 (Excel / CSV)", type=["xls", "xlsx", "csv"], key="dse_main")
-    with col_d2: f_s6_t2a3 = st.file_uploader("2. (選填) 上傳中六 T2A3 / 模擬試成績表進行對照 (Excel / CSV)", type=["xls", "xlsx", "csv"], key="s6_t2a3_dse")
+    with col_d1: 
+        f_dse_up = st.file_uploader("1. 上傳/替換 2526hkdse 成績表", type=["xls", "xlsx", "csv"], key="dse_main")
+        f_dse, msg_dse_tab2 = resolve_file_source(f_dse_up, ['2526hkdse.xlsx', '2526hkdse.csv'])
+        if f_dse: st.caption(msg_dse_tab2)
+
+    with col_d2: 
+        f_s6_t2a3_up = st.file_uploader("2. (選填) 上傳/替換中六 T2A3 / 模擬試成績表", type=["xls", "xlsx", "csv"], key="s6_t2a3_dse")
+        f_s6_t2a3, msg_s6_tab2 = resolve_file_source(f_s6_t2a3_up, ['2526_T1A3_s6.xlsx', '2526_T1A3_s6.csv'])
+        if f_s6_t2a3: st.caption(msg_s6_tab2)
     
     if f_dse:
         try:
@@ -564,7 +612,9 @@ with main_tab2:
 # ==================== 分頁三：校內成績預測與四類名單 ====================
 with main_tab3:
     st.subheader("🔮 校內成績預測：產生「大學」、「特別支援（差一科）」、「大專」及「保底」名單")
-    f_eval = st.file_uploader("上傳校內成績表 (Excel / CSV)", type=["xls", "xlsx", "csv"], key="eval_up")
+    f_eval_up = st.file_uploader("上傳/替換校內成績表 (Excel / CSV)", type=["xls", "xlsx", "csv"], key="eval_up")
+    f_eval, msg_eval_tab3 = resolve_file_source(f_eval_up, ['2526_T1A3_s6.xlsx', '2526_T1A3_s6.csv'])
+    if f_eval: st.caption(msg_eval_tab3)
     
     if f_eval:
         try:
