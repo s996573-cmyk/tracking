@@ -102,6 +102,24 @@ def clean_id(v):
     return s.strip()
 
 
+# 載入學生中文姓名資料庫 (全局優先載入)
+@st.cache_data
+def load_student_info():
+    file_path = "student_info.xlsx"
+    if os.path.exists(file_path):
+        try:
+            df_info = safe_read_file(file_path)
+            if "註冊編號" in df_info.columns and "中文姓名" in df_info.columns:
+                df_info["註冊編號_clean"] = df_info["註冊編號"].apply(clean_id)
+                return df_info[["註冊編號_clean", "中文姓名"]].dropna()
+        except Exception:
+            pass
+    return None
+
+
+student_info_df = load_student_info()
+
+
 # 健壯的 DSE 成績等級轉數值函數
 def parse_dse_grade(val):
     if pd.isna(val):
@@ -588,6 +606,21 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
             ),
         )
 
+    # 🌟 自動補全「中文姓名」（若 student_info.xlsx 存在且原檔案缺乏）
+    if student_info_df is not None:
+        has_chi_col = any(
+            k in m_ai.columns
+            for k in ["中文姓名", "Chinese Name", "C_Name", "Chi_Name", "中文名"]
+        )
+        if not has_chi_col:
+            m_ai = pd.merge(
+                m_ai,
+                student_info_df,
+                left_on="Reg_Clean",
+                right_on="註冊編號_clean",
+                how="left",
+            )
+
     m_ai = extract_robust_scores(m_ai)
 
     chi_col = find_best_dse_subject_col(d_dse.columns, ["A010", "CHINESE", "中文"])
@@ -668,8 +701,15 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
         "*Class Number": "班號",
         "Class No.": "班號",
         "中文姓名": "中文姓名",
+        "中文姓名_x": "中文姓名",
+        "中文姓名_y": "中文姓名",
+        "Chinese Name": "中文姓名",
+        "C_Name": "中文姓名",
+        "Chi_Name": "中文姓名",
+        "中文名": "中文姓名",
         "Name": "英文姓名",
         "*Student Name": "英文姓名",
+        "English Name": "英文姓名",
         "Avg_Score": "校內總平均分",
         "Chi_Score": "校內中文分數",
         "Eng_Score": "校內英文分數",
@@ -681,7 +721,7 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
     }
 
     display_cols = []
-    # 基礎欄位定義 (不含達標類別)
+    # 基礎欄位定義 (含中文姓名)
     base_order = [
         "學年",
         "班別",
@@ -719,7 +759,7 @@ def process_training_pair(f_sch, f_dse, dataset_label="2526"):
         if dse_col_name in comp_df.columns:
             display_cols.append(dse_col_name)
 
-    # 確保單獨數據集的「達標類別」也在末尾
+    # 確保「達標類別」最後加入，穩固排在表格最後一欄
     if "達標類別" in comp_df.columns:
         if "達標類別" in display_cols:
             display_cols.remove("達標類別")
@@ -751,23 +791,6 @@ def extract_ai_thresholds(df_train, feats):
 
     return final_thresh
 
-
-# 載入學生中文姓名資料庫
-@st.cache_data
-def load_student_info():
-    file_path = "student_info.xlsx"
-    if os.path.exists(file_path):
-        try:
-            df_info = safe_read_file(file_path)
-            if "註冊編號" in df_info.columns and "中文姓名" in df_info.columns:
-                df_info["註冊編號_clean"] = df_info["註冊編號"].apply(clean_id)
-                return df_info[["註冊編號_clean", "中文姓名"]].dropna()
-        except Exception:
-            pass
-    return None
-
-
-student_info_df = load_student_info()
 
 st.title("📊 學生成績追蹤、數據建模與 DSE 升學分析系統")
 
@@ -982,7 +1005,7 @@ with main_tab1:
 
         df_all_comp = pd.concat(comp_dfs, ignore_index=True)
 
-        # 核心修正：合併多套數據後，強制將「達標類別」移至所有動態欄位的最末端
+        # 強制將「達標類別」移至所有動態欄位的最末端
         if "達標類別" in df_all_comp.columns:
             reordered_cols = [
                 c for c in df_all_comp.columns if c != "達標類別"
@@ -1104,7 +1127,7 @@ with main_tab1:
                 df_disp_filtered["學年"].astype(str) == filter_year
             ]
 
-        # 雙重保險：顯示前再次確認「達標類別」位在最末列
+        # 顯示前再次確保「達標類別」鎖定在表格最右側最後一欄
         if "達標類別" in df_disp_filtered.columns:
             disp_cols = [
                 c for c in df_disp_filtered.columns if c != "達標類別"
